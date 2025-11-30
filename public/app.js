@@ -2097,8 +2097,40 @@ const shellCommands = {
           writeToTerminal("sed: invalid command", "error");
         }
       } else if (script.startsWith("d")) {
-        // Delete lines command (simplified - would need line numbers)
-        writeToTerminal("sed: delete command requires line numbers (not yet implemented)", "error");
+        // Delete lines command - supports line numbers like 1d, 2,5d, $d
+        const deleteMatch = script.match(/^(\d+|\$)?,?(\d+|\$)?d$/);
+        if (deleteMatch) {
+          for (const file of files) {
+            const result = await readFile(file);
+            if (result.success) {
+              let lines = result.content.split("\n");
+              const totalLines = lines.length;
+              
+              // Parse line numbers
+              const startLine = deleteMatch[1] ? (deleteMatch[1] === "$" ? totalLines : parseInt(deleteMatch[1]) - 1) : 0;
+              const endLine = deleteMatch[2] ? (deleteMatch[2] === "$" ? totalLines : parseInt(deleteMatch[2])) : startLine + 1;
+              
+              // Delete specified lines
+              lines.splice(startLine, endLine - startLine);
+              const newContent = lines.join("\n");
+              
+              if (inPlace) {
+                const writeResult = await writeFile(file, newContent);
+                if (writeResult.success) {
+                  writeToTerminal(`sed: edited '${file}'`, "success");
+                } else {
+                  writeToTerminal(`sed: ${file}: ${writeResult.error}`, "error");
+                }
+              } else {
+                writeToTerminal(newContent, "info");
+              }
+            } else {
+              writeToTerminal(`sed: ${file}: ${result.error}`, "error");
+            }
+          }
+        } else {
+          writeToTerminal("sed: invalid delete command. Use format: [start],[end]d (e.g., 1d, 2,5d, $d)", "error");
+        }
       } else {
         writeToTerminal(`sed: unsupported command '${script}'`, "error");
         writeToTerminal("Supported: s/pattern/replacement/[flags] (use -i for in-place editing)", "error");
@@ -2214,6 +2246,13 @@ const shellCommands = {
       const reverse = args.includes("-r");
       const numeric = args.includes("-n");
       const files = args.filter(arg => !arg.startsWith("-"));
+      
+      // Handle stdin (piped input) if no files specified
+      if (files.length === 0) {
+        writeToTerminal("sort: missing file operand", "error");
+        writeToTerminal("Note: stdin input works when piped from another command", "info");
+        return;
+      }
       
       for (const file of files) {
         const result = await readFile(file);

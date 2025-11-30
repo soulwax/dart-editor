@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2024-01-20
+
+### Added
+
+#### Enhanced `sed` Command
+- **Delete command support** - `sed 'Nd'` and `sed 'N,Md'` syntax
+  - Delete single line: `sed '1d' file`
+  - Delete line range: `sed '2,5d' file`
+  - Delete last line: `sed '$d' file`
+  - Works with `-i` flag for in-place editing
+  - Proper line number parsing and validation
+
+#### Improved Text Processing Commands
+- **Enhanced `sort`** - Better error handling for stdin
+  - Clearer messages when no file specified
+  - Note about piped input support
+  
+- **Enhanced `uniq`** - Better error handling for stdin
+  - Clearer messages when no file specified
+  - Note about piped input support
+
+- **Enhanced `cut`** - Improved stdin handling
+  - Better message for stdin input
+  - Note about pipe support
+  - More informative error messages
+
+### Fixed
+- Completed "not yet implemented" features
+  - `sed` delete command now fully functional
+  - Better handling of stdin/piped input in text processing commands
+  - Improved error messages across commands
+
+### Changed
+- Improved command error messages
+  - More helpful hints about pipe support
+  - Better guidance for command usage
+  - Consistent error formatting
+
+---
+
 ## [0.5.0] - 2024-01-20
 
 ### Added
