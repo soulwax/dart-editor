@@ -136,6 +136,34 @@ body {
   box-shadow: 0 4px 12px rgba(255, 107, 107, 0.5);
 }
 
+.btn-success {
+  background-color: #66bb6a;
+  border-color: #66bb6a;
+  color: #000000;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(102, 187, 106, 0.3);
+}
+
+.btn-success:hover {
+  background-color: #4caf50;
+  border-color: #4caf50;
+  box-shadow: 0 4px 12px rgba(102, 187, 106, 0.5);
+}
+
+.btn-info {
+  background-color: transparent;
+  border-color: #42a5f5;
+  color: #42a5f5;
+  font-weight: 600;
+}
+
+.btn-info:hover {
+  background-color: #42a5f5;
+  border-color: #42a5f5;
+  color: #000000;
+  box-shadow: 0 4px 12px rgba(66, 165, 245, 0.5);
+}
+
 .btn-icon {
   font-size: 14px;
 }

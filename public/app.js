@@ -396,6 +396,262 @@ require(["vs/editor/editor.main"], function () {
     },
   });
 
+  // Register Diagnostics Provider (Live Error Checking)
+  let diagnosticsTimeout = null;
+  function validateDartCode(model) {
+    if (diagnosticsTimeout) {
+      clearTimeout(diagnosticsTimeout);
+    }
+
+    diagnosticsTimeout = setTimeout(() => {
+      const text = model.getValue();
+      const markers = [];
+      const lines = text.split("\n");
+
+      // Basic syntax validation
+      lines.forEach((line, index) => {
+        const lineNumber = index + 1;
+
+        // Check for unclosed strings
+        const singleQuotes = (line.match(/'/g) || []).length;
+        const doubleQuotes = (line.match(/"/g) || []).length;
+        if (singleQuotes % 2 !== 0 && line.includes("'")) {
+          markers.push({
+            severity: monaco.MarkerSeverity.Error,
+            startLineNumber: lineNumber,
+            startColumn: 1,
+            endLineNumber: lineNumber,
+            endColumn: line.length + 1,
+            message: "Unclosed single-quoted string",
+          });
+        }
+        if (doubleQuotes % 2 !== 0 && line.includes('"')) {
+          markers.push({
+            severity: monaco.MarkerSeverity.Error,
+            startLineNumber: lineNumber,
+            startColumn: 1,
+            endLineNumber: lineNumber,
+            endColumn: line.length + 1,
+            message: "Unclosed double-quoted string",
+          });
+        }
+
+        // Check for common errors
+        if (line.trim() && !line.trim().startsWith("//") && !line.trim().startsWith("/*")) {
+          // Missing semicolon warning (not error, just warning)
+          if (
+            line.trim().length > 0 &&
+            !line.trim().endsWith(";") &&
+            !line.trim().endsWith("{") &&
+            !line.trim().endsWith("}") &&
+            !line.includes("if") &&
+            !line.includes("for") &&
+            !line.includes("while") &&
+            !line.includes("class") &&
+            !line.includes("void") &&
+            !line.includes("import") &&
+            !line.includes("//")
+          ) {
+            // Only warn if it looks like a statement
+            if (
+              line.includes("=") ||
+              line.includes("print") ||
+              line.includes("return") ||
+              line.match(/^\s*\w+\s*\(/)
+            ) {
+              markers.push({
+                severity: monaco.MarkerSeverity.Warning,
+                startLineNumber: lineNumber,
+                startColumn: line.length,
+                endLineNumber: lineNumber,
+                endColumn: line.length + 1,
+                message: "Missing semicolon?",
+              });
+            }
+          }
+
+          // Check for undefined variables (basic check)
+          if (line.includes("print(") && !line.includes("'") && !line.includes('"')) {
+            markers.push({
+              severity: monaco.MarkerSeverity.Warning,
+              startLineNumber: lineNumber,
+              startColumn: 1,
+              endLineNumber: lineNumber,
+              endColumn: line.length + 1,
+              message: "print() should contain a string or variable",
+            });
+          }
+        }
+      });
+
+      // Check for balanced braces
+      let openBraces = 0;
+      let openParens = 0;
+      let openBrackets = 0;
+      text.split("").forEach((char, index) => {
+        if (char === "{") openBraces++;
+        if (char === "}") openBraces--;
+        if (char === "(") openParens++;
+        if (char === ")") openParens--;
+        if (char === "[") openBrackets++;
+        if (char === "]") openBrackets--;
+      });
+
+      if (openBraces !== 0) {
+        markers.push({
+          severity: monaco.MarkerSeverity.Error,
+          startLineNumber: lines.length,
+          startColumn: 1,
+          endLineNumber: lines.length,
+          endColumn: 1,
+          message: `Unmatched braces: ${openBraces > 0 ? openBraces + " unclosed" : Math.abs(openBraces) + " extra closing"}`,
+        });
+      }
+      if (openParens !== 0) {
+        markers.push({
+          severity: monaco.MarkerSeverity.Error,
+          startLineNumber: lines.length,
+          startColumn: 1,
+          endLineNumber: lines.length,
+          endColumn: 1,
+          message: `Unmatched parentheses: ${openParens > 0 ? openParens + " unclosed" : Math.abs(openParens) + " extra closing"}`,
+        });
+      }
+      if (openBrackets !== 0) {
+        markers.push({
+          severity: monaco.MarkerSeverity.Error,
+          startLineNumber: lines.length,
+          startColumn: 1,
+          endLineNumber: lines.length,
+          endColumn: 1,
+          message: `Unmatched brackets: ${openBrackets > 0 ? openBrackets + " unclosed" : Math.abs(openBrackets) + " extra closing"}`,
+        });
+      }
+
+      monaco.editor.setModelMarkers(model, "dart-validator", markers);
+    }, 500); // Debounce for 500ms
+  }
+
+  // Register Definition Provider (Go to Definition)
+  monaco.languages.registerDefinitionProvider("dart", {
+    provideDefinition: function (model, position) {
+      const word = model.getWordAtPosition(position);
+      if (!word) return null;
+
+      const wordText = word.word;
+      const text = model.getValue();
+      const lines = text.split("\n");
+
+      // Find where this symbol is defined
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Look for function/class/variable definitions
+        const funcMatch = line.match(
+          new RegExp(`(void|int|String|double|bool|var|final|const)\\s+${wordText}\\s*\\(`)
+        );
+        const classMatch = line.match(new RegExp(`class\\s+${wordText}`));
+        const varMatch = line.match(
+          new RegExp(`(var|final|const|int|String|double|bool)\\s+${wordText}\\s*[=;]`)
+        );
+
+        if (funcMatch || classMatch || varMatch) {
+          return {
+            uri: model.uri,
+            range: {
+              startLineNumber: i + 1,
+              startColumn: 1,
+              endLineNumber: i + 1,
+              endColumn: line.length + 1,
+            },
+          };
+        }
+      }
+
+      return null;
+    },
+  });
+
+  // Register References Provider (Find All References)
+  monaco.languages.registerReferenceProvider("dart", {
+    provideReferences: function (model, position) {
+      const word = model.getWordAtPosition(position);
+      if (!word) return null;
+
+      const wordText = word.word;
+      const text = model.getValue();
+      const lines = text.split("\n");
+      const references = [];
+
+      // Find all occurrences
+      lines.forEach((line, index) => {
+        const regex = new RegExp(`\\b${wordText}\\b`, "g");
+        let match;
+        while ((match = regex.exec(line)) !== null) {
+          references.push({
+            uri: model.uri,
+            range: {
+              startLineNumber: index + 1,
+              startColumn: match.index + 1,
+              endLineNumber: index + 1,
+              endColumn: match.index + wordText.length + 1,
+            },
+          });
+        }
+      });
+
+      return references.length > 0 ? references : null;
+    },
+  });
+
+  // Register Rename Provider
+  monaco.languages.registerRenameProvider("dart", {
+    provideRenameEdits: function (model, position, newName) {
+      const word = model.getWordAtPosition(position);
+      if (!word) return null;
+
+      const wordText = word.word;
+      const text = model.getValue();
+      const lines = text.split("\n");
+      const edits = [];
+
+      // Replace all occurrences
+      lines.forEach((line, index) => {
+        const regex = new RegExp(`\\b${wordText}\\b`, "g");
+        let match;
+        while ((match = regex.exec(line)) !== null) {
+          edits.push({
+            resource: model.uri,
+            range: {
+              startLineNumber: index + 1,
+              startColumn: match.index + 1,
+              endLineNumber: index + 1,
+              endColumn: match.index + wordText.length + 1,
+            },
+            text: newName,
+          });
+        }
+      });
+
+      return {
+        edits: edits,
+      };
+    },
+    resolveRenameLocation: function (model, position) {
+      const word = model.getWordAtPosition(position);
+      if (!word) return null;
+
+      return {
+        range: {
+          startLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endLineNumber: position.lineNumber,
+          endColumn: word.endColumn,
+        },
+        text: word.word,
+      };
+    },
+  });
+
   // Register Document Formatting Provider
   monaco.languages.registerDocumentFormattingEditProvider("dart", {
     provideDocumentFormattingEdits: function (model, options) {
@@ -580,6 +836,18 @@ require(["vs/editor/editor.main"], function () {
     folding: true,
   });
 
+  // Live diagnostics - validate on content change
+  dartEditor.getModel().onDidChangeContent(() => {
+    validateDartCode(dartEditor.getModel());
+    autoSave(); // Auto-save on changes
+  });
+
+  // Load auto-saved code on startup
+  loadAutoSave();
+
+  // Initial validation
+  validateDartCode(dartEditor.getModel());
+
   // Synchronized scrolling
   dartEditor.onDidScrollChange((e) => {
     if (scrollSyncEnabled && outputEditor) {
@@ -607,6 +875,10 @@ require(["vs/editor/editor.main"], function () {
 const compileJsBtn = document.getElementById("compileJsBtn");
 const compileNativeBtn = document.getElementById("compileNativeBtn");
 const clearBtn = document.getElementById("clearBtn");
+const runBtn = document.getElementById("runBtn");
+const saveBtn = document.getElementById("saveBtn");
+const loadBtn = document.getElementById("loadBtn");
+const templatesBtn = document.getElementById("templatesBtn");
 const statusIndicator = document.getElementById("statusIndicator");
 const statusText = document.getElementById("statusText");
 const notification = document.getElementById("notification");
@@ -615,10 +887,116 @@ const notificationMessage = document.getElementById("notificationMessage");
 const notificationClose = document.getElementById("notificationClose");
 const outputInfo = document.getElementById("outputInfo");
 
+// Code Templates
+const CODE_TEMPLATES = {
+  "Hello World": `void main() {
+  print('Hello, World!');
+}`,
+  "Variables & Types": `void main() {
+  // Variables
+  var name = 'Dart';
+  int age = 10;
+  double height = 1.75;
+  bool isActive = true;
+  
+  print('Name: \$name');
+  print('Age: \$age');
+  print('Height: \$height');
+  print('Active: \$isActive');
+}`,
+  "Lists & Collections": `void main() {
+  // List
+  List<int> numbers = [1, 2, 3, 4, 5];
+  numbers.add(6);
+  print('Numbers: \$numbers');
+  
+  // Map
+  Map<String, int> ages = {
+    'Alice': 30,
+    'Bob': 25,
+  };
+  print('Ages: \$ages');
+  
+  // Set
+  Set<String> names = {'Alice', 'Bob', 'Charlie'};
+  print('Names: \$names');
+}`,
+  "Functions": `void main() {
+  greet('Alice');
+  int result = add(5, 3);
+  print('Result: \$result');
+}
+
+void greet(String name) {
+  print('Hello, \$name!');
+}
+
+int add(int a, int b) {
+  return a + b;
+}`,
+  "Classes": `void main() {
+  var person = Person('Alice', 30);
+  person.introduce();
+}
+
+class Person {
+  String name;
+  int age;
+  
+  Person(this.name, this.age);
+  
+  void introduce() {
+    print('Hi, I'm \$name and I'm \$age years old.');
+  }
+}`,
+  "Async/Await": `void main() async {
+  print('Starting...');
+  await fetchData();
+  print('Done!');
+}
+
+Future<void> fetchData() async {
+  await Future.delayed(Duration(seconds: 2));
+  print('Data fetched!');
+}`,
+  "Error Handling": `void main() {
+  try {
+    int result = divide(10, 0);
+    print('Result: \$result');
+  } catch (e) {
+    print('Error: \$e');
+  }
+}
+
+int divide(int a, int b) {
+  if (b == 0) {
+    throw Exception('Division by zero!');
+  }
+  return a ~/ b;
+}`,
+  "Streams": `void main() async {
+  var stream = countStream(5);
+  await for (var value in stream) {
+    print('Received: \$value');
+  }
+}
+
+Stream<int> countStream(int max) async* {
+  for (int i = 1; i <= max; i++) {
+    await Future.delayed(Duration(seconds: 1));
+    yield i;
+  }
+}`,
+};
+
 // Event Listeners
 compileJsBtn.addEventListener("click", () => compile("js"));
 compileNativeBtn.addEventListener("click", () => compile("native"));
 clearBtn.addEventListener("click", clearOutput);
+runBtn.addEventListener("click", runCode);
+saveBtn.addEventListener("click", saveCode);
+loadBtn.addEventListener("click", loadCode);
+templatesBtn.addEventListener("click", showTemplates);
 notificationClose.addEventListener("click", hideNotification);
 
 // Auto-hide notification after 5 seconds
@@ -800,6 +1178,169 @@ function hideNotification() {
   }
 }
 
+// Run compiled JavaScript code
+function runCode() {
+  const outputValue = outputEditor.getValue();
+  
+  if (!outputValue || outputValue.trim().startsWith("//")) {
+    showNotification(
+      "warning",
+      "⚠️",
+      "Please compile to JavaScript first (Ctrl/Cmd + Enter)"
+    );
+    return;
+  }
+
+  // Check if output is JavaScript
+  const model = outputEditor.getModel();
+  if (monaco.editor.getModelLanguage(model) !== "javascript") {
+    showNotification(
+      "warning",
+      "⚠️",
+      "Output must be JavaScript. Please compile to JS first."
+    );
+    return;
+  }
+
+  try {
+    // Create a safe execution context
+    const consoleOutput = [];
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    // Capture console output
+    console.log = (...args) => {
+      consoleOutput.push(args.map((a) => String(a)).join(" "));
+      originalLog.apply(console, args);
+    };
+    console.error = (...args) => {
+      consoleOutput.push("ERROR: " + args.map((a) => String(a)).join(" "));
+      originalError.apply(console, args);
+    };
+    console.warn = (...args) => {
+      consoleOutput.push("WARN: " + args.map((a) => String(a)).join(" "));
+      originalWarn.apply(console, args);
+    };
+
+    // Execute the code
+    eval(outputValue);
+
+    // Restore console
+    console.log = originalLog;
+    console.error = originalError;
+    console.warn = originalWarn;
+
+    // Show results
+    if (consoleOutput.length > 0) {
+      const result = "// Execution Output:\n" + consoleOutput.join("\n");
+      outputEditor.setValue(result);
+      showNotification("success", "✅", "Code executed successfully!");
+    } else {
+      showNotification("info", "ℹ️", "Code executed (no console output)");
+    }
+  } catch (error) {
+    const errorMsg = `// Execution Error:\n\n${error.name}: ${error.message}\n\n${error.stack || ""}`;
+    outputEditor.setValue(errorMsg);
+    showNotification("error", "❌", "Execution failed: " + error.message);
+    console.error("Execution error:", error);
+  }
+}
+
+// Save code to localStorage
+function saveCode() {
+  const code = dartEditor.getValue();
+  try {
+    localStorage.setItem("dartEditor_code", code);
+    const timestamp = new Date().toLocaleString();
+    localStorage.setItem("dartEditor_timestamp", timestamp);
+    showNotification("success", "✅", `Code saved at ${timestamp}`);
+  } catch (error) {
+    showNotification("error", "❌", "Failed to save: " + error.message);
+  }
+}
+
+// Load code from localStorage
+function loadCode() {
+  try {
+    const savedCode = localStorage.getItem("dartEditor_code");
+    if (savedCode) {
+      dartEditor.setValue(savedCode);
+      const timestamp = localStorage.getItem("dartEditor_timestamp") || "unknown";
+      showNotification("success", "✅", `Code loaded (saved: ${timestamp})`);
+    } else {
+      showNotification("warning", "⚠️", "No saved code found");
+    }
+  } catch (error) {
+    showNotification("error", "❌", "Failed to load: " + error.message);
+  }
+}
+
+// Show code templates
+function showTemplates() {
+  const templateNames = Object.keys(CODE_TEMPLATES);
+  const templateList = templateNames
+    .map((name, index) => `${index + 1}. ${name}`)
+    .join("\n");
+
+  const message = `Available Templates:\n\n${templateList}\n\nType the template name or number to load it.`;
+  
+  // Create a simple prompt (could be enhanced with a modal)
+  const templateName = prompt(message);
+  
+  if (templateName) {
+    // Try to match by number or name
+    const templateIndex = parseInt(templateName) - 1;
+    let selectedTemplate = null;
+
+    if (templateIndex >= 0 && templateIndex < templateNames.length) {
+      selectedTemplate = CODE_TEMPLATES[templateNames[templateIndex]];
+    } else {
+      // Try to find by name (case-insensitive)
+      const foundName = templateNames.find(
+        (name) => name.toLowerCase() === templateName.toLowerCase()
+      );
+      if (foundName) {
+        selectedTemplate = CODE_TEMPLATES[foundName];
+      }
+    }
+
+    if (selectedTemplate) {
+      dartEditor.setValue(selectedTemplate);
+      showNotification("success", "✅", "Template loaded!");
+    } else {
+      showNotification("warning", "⚠️", "Template not found");
+    }
+  }
+}
+
+// Auto-save on changes (debounced)
+let autoSaveTimeout = null;
+function autoSave() {
+  if (autoSaveTimeout) {
+    clearTimeout(autoSaveTimeout);
+  }
+  autoSaveTimeout = setTimeout(() => {
+    const code = dartEditor.getValue();
+    if (code && code.trim().length > 0) {
+      localStorage.setItem("dartEditor_autosave", code);
+    }
+  }, 2000); // Auto-save after 2 seconds of inactivity
+}
+
+// Load auto-saved code on startup
+function loadAutoSave() {
+  try {
+    const autoSaved = localStorage.getItem("dartEditor_autosave");
+    if (autoSaved && autoSaved !== DEFAULT_DART_CODE) {
+      dartEditor.setValue(autoSaved);
+      showNotification("info", "ℹ️", "Auto-saved code restored");
+    }
+  } catch (error) {
+    console.error("Failed to load auto-save:", error);
+  }
+}
+
 // Keyboard shortcuts
 document.addEventListener("keydown", (e) => {
   // Ctrl/Cmd + Enter: Compile to JS
@@ -827,17 +1368,41 @@ document.addEventListener("keydown", (e) => {
       dartEditor.getAction("editor.action.formatDocument").run();
     }
   }
+
+  // Ctrl/Cmd + S: Save code
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    saveCode();
+  }
+
+  // Ctrl/Cmd + R: Run code
+  if ((e.ctrlKey || e.metaKey) && e.key === "r" && !e.shiftKey) {
+    e.preventDefault();
+    runCode();
+  }
 });
 
 console.log("Soul's Dart Editor initialized");
 console.log("Keyboard shortcuts:");
 console.log("  Ctrl/Cmd + Enter: Compile to JS");
 console.log("  Ctrl/Cmd + Shift + Enter: Compile to Native");
+console.log("  Ctrl/Cmd + R: Run compiled JavaScript");
+console.log("  Ctrl/Cmd + S: Save code");
 console.log("  Ctrl/Cmd + K: Clear output");
 console.log("  Ctrl/Cmd + Shift + F: Format code");
 console.log("  Ctrl/Cmd + F: Find");
 console.log("  Ctrl/Cmd + H: Replace");
 console.log("  Ctrl/Cmd + /: Toggle comment");
 console.log("  Ctrl/Cmd + Space: Trigger IntelliSense");
+console.log("  F12: Go to Definition");
+console.log("  Shift + F12: Find All References");
+console.log("  F2: Rename Symbol");
 console.log("  Ctrl/Cmd + Click: Multi-cursor");
 console.log("  Alt + Click: Column selection");
+console.log("\n✨ Life-changing features:");
+console.log("  • Live error checking (as you type)");
+console.log("  • Run JavaScript code directly");
+console.log("  • Auto-save to localStorage");
+console.log("  • Code templates & examples");
+console.log("  • Go to Definition / Find References");
+console.log("  • Rename Symbol across code");

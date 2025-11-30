@@ -2,6 +2,8 @@
 
 A professional web-based IDE for Dart development featuring the Dart Editor with dual-pane layout, syntax highlighting, and compilation capabilities.
 
+Visit [https://editor.madtek.de/](https://editor.madtek.de/) to try it out.
+
 ## Features
 
 - **Dual-Pane Dart Editor Interface**
