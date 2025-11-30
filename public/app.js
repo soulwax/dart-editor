@@ -901,6 +901,8 @@ const templatesBtn = document.getElementById("templatesBtn");
 const terminalToggleBtn = document.getElementById("terminalToggleBtn");
 const terminalPanel = document.getElementById("terminalPanel");
 const terminalOutput = document.getElementById("terminalOutput");
+const terminalHistory = document.getElementById("terminalHistory");
+const terminalInput = document.getElementById("terminalInput");
 const terminalConsole = document.getElementById("terminalConsole");
 const terminalProblems = document.getElementById("terminalProblems");
 const terminalClearBtn = document.getElementById("terminalClearBtn");
@@ -921,6 +923,13 @@ const outputInfo = document.getElementById("outputInfo");
 let terminalVisible = false;
 let terminalTab = "output";
 let problems = [];
+
+// Shell state
+let shellHistory = [];
+let shellHistoryIndex = -1;
+let currentCommand = "";
+let shellCwd = "/"; // Current working directory (virtual)
+let shellEnv = {}; // Environment variables
 
 // Code Templates
 const CODE_TEMPLATES = {
@@ -1027,22 +1036,216 @@ function writeToTerminal(message, type = "info") {
     showTerminal();
   }
   
-  const timestamp = new Date().toLocaleTimeString();
   const line = document.createElement("div");
   line.className = `terminal-line ${type}`;
+  line.textContent = message;
   
-  const timestampSpan = document.createElement("span");
-  timestampSpan.className = "timestamp";
-  timestampSpan.textContent = `[${timestamp}] `;
-  
-  const messageSpan = document.createElement("span");
-  messageSpan.textContent = message;
-  
-  line.appendChild(timestampSpan);
-  line.appendChild(messageSpan);
-  terminalOutput.appendChild(line);
+  terminalHistory.appendChild(line);
   
   // Auto-scroll to bottom
+  terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+
+function writePrompt() {
+  const promptLine = document.createElement("div");
+  promptLine.className = "terminal-prompt-line";
+  promptLine.innerHTML = `<span class="terminal-prompt-text">${shellCwd} $</span>`;
+  terminalHistory.appendChild(promptLine);
+  terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+
+// Shell Commands
+const shellCommands = {
+  help: {
+    description: "Show available commands",
+    execute: () => {
+      const commands = Object.keys(shellCommands).sort();
+      writeToTerminal("Available commands:", "info");
+      commands.forEach(cmd => {
+        writeToTerminal(`  ${cmd.padEnd(12)} - ${shellCommands[cmd].description}`, "info");
+      });
+    }
+  },
+  
+  clear: {
+    description: "Clear terminal",
+    execute: () => {
+      terminalHistory.innerHTML = "";
+      writePrompt();
+    }
+  },
+  
+  echo: {
+    description: "Print arguments",
+    execute: (args) => {
+      writeToTerminal(args.join(" "), "info");
+    }
+  },
+  
+  pwd: {
+    description: "Print working directory",
+    execute: () => {
+      writeToTerminal(shellCwd, "info");
+    }
+  },
+  
+  cd: {
+    description: "Change directory",
+    execute: (args) => {
+      if (args.length === 0) {
+        shellCwd = "/";
+      } else {
+        const path = args[0];
+        if (path === "/") {
+          shellCwd = "/";
+        } else if (path === "..") {
+          if (shellCwd !== "/") {
+            const parts = shellCwd.split("/").filter(p => p);
+            parts.pop();
+            shellCwd = parts.length > 0 ? "/" + parts.join("/") : "/";
+          }
+        } else if (path.startsWith("/")) {
+          shellCwd = path;
+        } else {
+          shellCwd = shellCwd === "/" ? "/" + path : shellCwd + "/" + path;
+        }
+      }
+    }
+  },
+  
+  ls: {
+    description: "List directory contents",
+    execute: (args) => {
+      // Virtual file system
+      const virtualFS = {
+        "/": ["home", "usr", "bin", "etc", "var", "tmp"],
+        "/home": ["user"],
+        "/usr": ["bin", "lib", "share"],
+        "/bin": ["sh", "bash", "ls", "cat", "echo"],
+        "/etc": ["passwd", "hosts"],
+        "/var": ["log", "tmp"],
+        "/tmp": []
+      };
+      
+      const path = args.length > 0 ? args[0] : shellCwd;
+      const normalizedPath = path.startsWith("/") ? path : (shellCwd === "/" ? "/" + path : shellCwd + "/" + path);
+      
+      if (virtualFS[normalizedPath]) {
+        virtualFS[normalizedPath].forEach(item => {
+          writeToTerminal(item, "info");
+        });
+      } else {
+        writeToTerminal(`ls: cannot access '${path}': No such file or directory`, "error");
+      }
+    }
+  },
+  
+  cat: {
+    description: "Display file contents",
+    execute: (args) => {
+      if (args.length === 0) {
+        writeToTerminal("cat: missing file operand", "error");
+        return;
+      }
+      
+      // Virtual file contents
+      const virtualFiles = {
+        "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nuser:x:1000:1000:user:/home/user:/bin/bash",
+        "/etc/hosts": "127.0.0.1 localhost\n::1 localhost",
+        "/var/log/system.log": "System started successfully\nAll services running\n"
+      };
+      
+      const filePath = args[0].startsWith("/") ? args[0] : (shellCwd === "/" ? "/" + args[0] : shellCwd + "/" + args[0]);
+      
+      if (virtualFiles[filePath]) {
+        writeToTerminal(virtualFiles[filePath], "info");
+      } else {
+        writeToTerminal(`cat: ${args[0]}: No such file or directory`, "error");
+      }
+    }
+  },
+  
+  whoami: {
+    description: "Print current user",
+    execute: () => {
+      writeToTerminal("user", "info");
+    }
+  },
+  
+  date: {
+    description: "Display current date and time",
+    execute: () => {
+      writeToTerminal(new Date().toString(), "info");
+    }
+  },
+  
+  uname: {
+    description: "Print system information",
+    execute: (args) => {
+      if (args.includes("-a")) {
+        writeToTerminal("Battlecry-Editor Terminal v1.0.0", "info");
+      } else {
+        writeToTerminal("Battlecry-Editor", "info");
+      }
+    }
+  },
+  
+  history: {
+    description: "Show command history",
+    execute: () => {
+      shellHistory.forEach((cmd, index) => {
+        writeToTerminal(`${index + 1}  ${cmd}`, "info");
+      });
+    }
+  },
+  
+  exit: {
+    description: "Close terminal",
+    execute: () => {
+      hideTerminal();
+    }
+  }
+};
+
+function executeShellCommand(input) {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    writePrompt();
+    return;
+  }
+  
+  // Add to history
+  if (trimmed && (shellHistory.length === 0 || shellHistory[shellHistory.length - 1] !== trimmed)) {
+    shellHistory.push(trimmed);
+    if (shellHistory.length > 100) {
+      shellHistory.shift();
+    }
+  }
+  shellHistoryIndex = shellHistory.length;
+  
+  // Display the command
+  const commandLine = document.createElement("div");
+  commandLine.className = "terminal-prompt-line";
+  commandLine.innerHTML = `<span class="terminal-prompt-text">${shellCwd} $</span> <span class="terminal-command">${trimmed}</span>`;
+  terminalHistory.appendChild(commandLine);
+  
+  // Parse command
+  const parts = trimmed.split(/\s+/);
+  const command = parts[0];
+  const args = parts.slice(1);
+  
+  // Execute command
+  if (shellCommands[command]) {
+    try {
+      shellCommands[command].execute(args);
+    } catch (error) {
+      writeToTerminal(`${command}: ${error.message}`, "error");
+    }
+  } else {
+    writeToTerminal(`Command not found: ${command}. Type 'help' for available commands.`, "error");
+  }
+  
+  writePrompt();
   terminalOutput.scrollTop = terminalOutput.scrollHeight;
 }
 
@@ -1176,8 +1379,8 @@ function writeToConsole(message, type = "info") {
 
 function clearTerminal() {
   if (terminalTab === "output") {
-    terminalOutput.innerHTML = "";
-    writeToTerminal("Terminal cleared", "info");
+    terminalHistory.innerHTML = "";
+    writePrompt();
   } else if (terminalTab === "console") {
     terminalConsole.innerHTML = "";
     writeToConsole("Console cleared", "info");
@@ -1192,6 +1395,16 @@ function showTerminal() {
   terminalPanel.classList.remove("hidden");
   terminalVisible = true;
   terminalToggleBtn.classList.add("active");
+  
+  // Initialize shell prompt if terminal history is empty
+  if (terminalHistory && terminalHistory.children.length === 0) {
+    writePrompt();
+  }
+  
+  // Focus input when terminal is shown
+  if (terminalInput && terminalTab === "output") {
+    setTimeout(() => terminalInput.focus(), 100);
+  }
 }
 
 function hideTerminal() {
@@ -1226,6 +1439,9 @@ function switchTerminalTab(tabName) {
   
   if (tabName === "problems") {
     updateProblemsPanel();
+  } else if (tabName === "output") {
+    // Focus input when switching to output tab
+    setTimeout(() => terminalInput?.focus(), 100);
   }
 }
 
@@ -1348,6 +1564,47 @@ document.querySelectorAll(".terminal-tab").forEach((tab) => {
     switchTerminalTab(tab.dataset.terminal);
   });
 });
+
+// Terminal input event listeners
+if (terminalInput) {
+  terminalInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const command = terminalInput.value;
+      terminalInput.value = "";
+      executeShellCommand(command);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (shellHistoryIndex > 0) {
+        shellHistoryIndex--;
+        terminalInput.value = shellHistory[shellHistoryIndex];
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (shellHistoryIndex < shellHistory.length - 1) {
+        shellHistoryIndex++;
+        terminalInput.value = shellHistory[shellHistoryIndex];
+      } else {
+        shellHistoryIndex = shellHistory.length;
+        terminalInput.value = currentCommand;
+      }
+    } else if (e.key === "Escape") {
+      currentCommand = terminalInput.value;
+      terminalInput.value = "";
+    }
+  });
+  
+  terminalInput.addEventListener("input", (e) => {
+    currentCommand = e.target.value;
+  });
+  
+  // Focus input when clicking on terminal
+  terminalOutput.addEventListener("click", () => {
+    if (terminalTab === "output") {
+      terminalInput.focus();
+    }
+  });
+}
 
 // Command Palette event listeners
 commandPaletteInput.addEventListener("input", (e) => {
@@ -1824,12 +2081,6 @@ document.addEventListener("keydown", (e) => {
 });
 
   console.log("Soul's Dart Editor initialized");
-  
-  // Initialize terminal with welcome message (after a short delay to ensure DOM is ready)
-  setTimeout(() => {
-    writeToTerminal("Dart Editor Terminal - Ready", "success");
-    writeToTerminal("Type commands or compile code to see output here", "info");
-  }, 100);
 console.log("Keyboard shortcuts:");
 console.log("  Ctrl/Cmd + Enter: Compile to JS");
 console.log("  Ctrl/Cmd + Shift + Enter: Compile to Native");
