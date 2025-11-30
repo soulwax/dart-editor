@@ -1,10 +1,13 @@
 // File: server.js
 
+require("dotenv").config();
 const express = require("express");
 const { exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { db, files, directories } = require("./db/index");
+const { eq, and } = require("drizzle-orm");
 
 const app = express();
 const PORT = process.env.PORT || 5555;
@@ -218,6 +221,195 @@ app.post("/compile", (req, res) => {
   }
 });
 
+// File system API endpoints
+
+// GET /api/files/:path - Read a file
+app.get("/api/files/*", async (req, res) => {
+  try {
+    const filePath = "/" + req.params[0];
+    const result = await db.select().from(files).where(eq(files.path, filePath)).limit(1);
+    
+    if (result.length === 0) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    
+    res.json({
+      success: true,
+      file: result[0],
+    });
+  } catch (error) {
+    console.error("Error reading file:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/files - Create a file
+app.post("/api/files", async (req, res) => {
+  try {
+    const { path: filePath, content = "", type = "file", permissions } = req.body;
+    
+    if (!filePath) {
+      return res.status(400).json({ error: "Path is required" });
+    }
+    
+    // Check if file already exists
+    const existing = await db.select().from(files).where(eq(files.path, filePath)).limit(1);
+    
+    if (existing.length > 0) {
+      return res.status(409).json({ error: "File already exists" });
+    }
+    
+    const defaultPerms = type === "directory" ? "drwxr-xr-x" : "-rw-r--r--";
+    const filePermissions = permissions || defaultPerms;
+    
+    const result = await db.insert(files).values({
+      path: filePath,
+      content: content,
+      type: type,
+      permissions: filePermissions,
+      size: content.length,
+    }).returning();
+    
+    res.json({
+      success: true,
+      file: result[0],
+    });
+  } catch (error) {
+    console.error("Error creating file:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/files/:path - Update a file
+app.put("/api/files/*", async (req, res) => {
+  try {
+    const filePath = "/" + req.params[0];
+    const { content, permissions } = req.body;
+    
+    const existing = await db.select().from(files).where(eq(files.path, filePath)).limit(1);
+    
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    
+    const updateData = {
+      updatedAt: new Date(),
+    };
+    
+    if (content !== undefined) {
+      updateData.content = content;
+      updateData.size = content.length;
+    }
+    
+    if (permissions !== undefined) {
+      updateData.permissions = permissions;
+    }
+    
+    const result = await db.update(files)
+      .set(updateData)
+      .where(eq(files.path, filePath))
+      .returning();
+    
+    res.json({
+      success: true,
+      file: result[0],
+    });
+  } catch (error) {
+    console.error("Error updating file:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/files/:path - Delete a file
+app.delete("/api/files/*", async (req, res) => {
+  try {
+    const filePath = "/" + req.params[0];
+    
+    const result = await db.delete(files)
+      .where(eq(files.path, filePath))
+      .returning();
+    
+    if (result.length === 0) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    
+    res.json({
+      success: true,
+      message: "File deleted",
+    });
+  } catch (error) {
+    console.error("Error deleting file:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/files - List files in a directory
+app.get("/api/files", async (req, res) => {
+  try {
+    const dirPath = req.query.path || "/";
+    
+    // Get all files that start with the directory path
+    const allFiles = await db.select().from(files);
+    const dirFiles = allFiles.filter(file => {
+      if (file.path === dirPath) return false; // Don't include the directory itself
+      if (dirPath === "/") {
+        // Root directory - files should be directly under root
+        const parts = file.path.split("/").filter(p => p);
+        return parts.length === 1;
+      }
+      // Files should start with dirPath and be direct children
+      if (!file.path.startsWith(dirPath + "/")) return false;
+      const relativePath = file.path.substring(dirPath.length + 1);
+      const parts = relativePath.split("/").filter(p => p);
+      return parts.length === 1; // Direct child only
+    });
+    
+    res.json({
+      success: true,
+      files: dirFiles,
+    });
+  } catch (error) {
+    console.error("Error listing files:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/directories - Create a directory
+app.post("/api/directories", async (req, res) => {
+  try {
+    const { path: dirPath } = req.body;
+    
+    if (!dirPath) {
+      return res.status(400).json({ error: "Path is required" });
+    }
+    
+    // Check if directory already exists
+    const existing = await db.select().from(files)
+      .where(and(eq(files.path, dirPath), eq(files.type, "directory")))
+      .limit(1);
+    
+    if (existing.length > 0) {
+      return res.status(409).json({ error: "Directory already exists" });
+    }
+    
+    const result = await db.insert(files).values({
+      path: dirPath,
+      content: "",
+      type: "directory",
+      permissions: "drwxr-xr-x",
+      size: 4096,
+    }).returning();
+    
+    res.json({
+      success: true,
+      directory: result[0],
+    });
+  } catch (error) {
+    console.error("Error creating directory:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Health check endpoint
 app.get("/health", (req, res) => {
   checkDartSDK((available) => {
@@ -229,11 +421,26 @@ app.get("/health", (req, res) => {
   });
 });
 
+// Initialize database connection
+async function initializeDatabase() {
+  try {
+    // Test database connection
+    await db.select().from(files).limit(1);
+    console.log("✅ Database connected successfully");
+  } catch (error) {
+    console.error("❌ Database connection error:", error.message);
+    console.error("   Make sure PostgreSQL is running and DB_URL is correct in .env");
+  }
+}
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 Soul's Dart Editor Server Running`);
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`⏰ Started at: ${new Date().toLocaleString()}\n`);
+
+  // Initialize database
+  await initializeDatabase();
 
   checkDartSDK((available) => {
     if (!available) {
@@ -249,8 +456,15 @@ app.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   console.log("\n🛑 Shutting down server...");
   cleanupTempFiles();
+  try {
+    const { client } = require("./db/index");
+    await client.end();
+    console.log("✅ Database connection closed");
+  } catch (error) {
+    console.error("Error closing database:", error);
+  }
   process.exit(0);
 });

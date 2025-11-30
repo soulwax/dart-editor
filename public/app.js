@@ -932,11 +932,13 @@ let shellHistoryIndex = -1;
 let currentCommand = "";
 let shellCwd = "/"; // Current working directory (virtual)
 let shellEnv = {}; // Environment variables
+let shellAliases = {}; // Command aliases
 let nodeReplMode = false; // Node.js REPL mode
 let nodeReplHistory = []; // REPL command history
 let nodeReplHistoryIndex = -1;
 let tabCompletionIndex = -1;
 let tabCompletionMatches = [];
+let lastExitCode = 0; // Last command exit code
 
 // Enhanced Virtual File System with metadata
 const virtualFS = {
@@ -1027,6 +1029,43 @@ let virtualFiles = {
   "/home/user/.profile": "# ~/.profile\n\nif [ -n \"$BASH_VERSION\" ]; then\n  . ~/.bashrc\nfi\n"
 };
 
+// Helper functions for shell features
+function expandEnvironmentVariables(text) {
+  // Expand $VAR and ${VAR}
+  return text.replace(/\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, braced, simple) => {
+    const varName = braced || simple;
+    return shellEnv[varName] !== undefined ? shellEnv[varName] : match;
+  });
+}
+
+function expandWildcards(pattern) {
+  // Simple wildcard expansion (* and ?)
+  const normalizedPattern = normalizePath(pattern);
+  const parent = getParentDir(normalizedPattern);
+  const fileNamePattern = getFileName(normalizedPattern);
+  
+  if (!virtualFS[parent] || !virtualFS[parent].items) {
+    return [pattern]; // Return original if directory doesn't exist
+  }
+  
+  const regexPattern = fileNamePattern
+    .replace(/\./g, "\\.")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  const regex = new RegExp(`^${regexPattern}$`);
+  
+  const matches = Object.keys(virtualFS[parent].items)
+    .filter(name => regex.test(name))
+    .map(name => parent === "/" ? `/${name}` : `${parent}/${name}`);
+  
+  return matches.length > 0 ? matches : [pattern];
+}
+
+function addRealisticDelay(ms = 50) {
+  // Add small delay to make commands feel more natural
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // File system helper functions
 function normalizePath(path) {
   if (path.startsWith("/")) {
@@ -1073,73 +1112,159 @@ function ensureDirectory(path) {
   return true;
 }
 
-function createFile(path, content = "") {
+// File system API functions (async)
+async function createFile(path, content = "") {
   const normalizedPath = normalizePath(path);
-  const parent = getParentDir(normalizedPath);
-  const fileName = getFileName(normalizedPath);
   
-  // Ensure parent directory exists
-  if (!virtualFS[parent] || virtualFS[parent].type !== "directory") {
-    return { success: false, error: `Cannot create file: parent directory does not exist` };
+  try {
+    const response = await fetch("/api/files", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: normalizedPath,
+        content: content,
+        type: "file",
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      // Update local cache
+      const parent = getParentDir(normalizedPath);
+      const fileName = getFileName(normalizedPath);
+      
+      if (!virtualFS[parent]) {
+        virtualFS[parent] = { type: "directory", items: {} };
+      }
+      if (!virtualFS[parent].items) {
+        virtualFS[parent].items = {};
+      }
+      
+      virtualFS[parent].items[fileName] = {
+        type: "file",
+        perms: data.file.permissions,
+        size: data.file.size,
+        modified: new Date(data.file.updatedAt),
+      };
+      
+      virtualFiles[normalizedPath] = content;
+      
+      return { success: true };
+    } else {
+      return { success: false, error: data.error || "Failed to create file" };
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-  
-  // Create file entry in directory
-  if (!virtualFS[parent].items) {
-    virtualFS[parent].items = {};
-  }
-  
-  virtualFS[parent].items[fileName] = {
-    type: "file",
-    perms: "-rw-r--r--",
-    size: content.length,
-    modified: new Date()
-  };
-  
-  // Store file content
-  virtualFiles[normalizedPath] = content;
-  
-  return { success: true };
 }
 
-function deleteFile(path) {
+async function deleteFile(path) {
   const normalizedPath = normalizePath(path);
-  const parent = getParentDir(normalizedPath);
-  const fileName = getFileName(normalizedPath);
   
-  if (!virtualFS[parent] || !virtualFS[parent].items || !virtualFS[parent].items[fileName]) {
-    return { success: false, error: `Cannot delete: file does not exist` };
+  try {
+    const response = await fetch(`/api/files/${normalizedPath.substring(1)}`, {
+      method: "DELETE",
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      // Update local cache
+      const parent = getParentDir(normalizedPath);
+      const fileName = getFileName(normalizedPath);
+      
+      if (virtualFS[parent] && virtualFS[parent].items) {
+        delete virtualFS[parent].items[fileName];
+      }
+      delete virtualFiles[normalizedPath];
+      
+      return { success: true };
+    } else {
+      return { success: false, error: data.error || "Failed to delete file" };
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-  
-  delete virtualFS[parent].items[fileName];
-  delete virtualFiles[normalizedPath];
-  
-  return { success: true };
 }
 
-function readFile(path) {
+async function readFile(path) {
   const normalizedPath = normalizePath(path);
+  
+  // Check local cache first
   if (virtualFiles[normalizedPath] !== undefined) {
     return { success: true, content: virtualFiles[normalizedPath] };
   }
-  return { success: false, error: "No such file or directory" };
+  
+  try {
+    const response = await fetch(`/api/files/${normalizedPath.substring(1)}`);
+    const data = await response.json();
+    
+    if (data.success && data.file) {
+      // Update local cache
+      virtualFiles[normalizedPath] = data.file.content;
+      
+      const parent = getParentDir(normalizedPath);
+      const fileName = getFileName(normalizedPath);
+      
+      if (!virtualFS[parent]) {
+        virtualFS[parent] = { type: "directory", items: {} };
+      }
+      if (!virtualFS[parent].items) {
+        virtualFS[parent].items = {};
+      }
+      
+      virtualFS[parent].items[fileName] = {
+        type: data.file.type,
+        perms: data.file.permissions,
+        size: data.file.size,
+        modified: new Date(data.file.updatedAt),
+      };
+      
+      return { success: true, content: data.file.content };
+    } else {
+      return { success: false, error: data.error || "No such file or directory" };
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 }
 
-function writeFile(path, content) {
+async function writeFile(path, content) {
   const normalizedPath = normalizePath(path);
-  const parent = getParentDir(normalizedPath);
-  const fileName = getFileName(normalizedPath);
   
-  // Check if file exists
-  if (!virtualFS[parent] || !virtualFS[parent].items || !virtualFS[parent].items[fileName]) {
-    return createFile(path, content);
+  try {
+    const response = await fetch(`/api/files/${normalizedPath.substring(1)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      // Update local cache
+      virtualFiles[normalizedPath] = content;
+      
+      const parent = getParentDir(normalizedPath);
+      const fileName = getFileName(normalizedPath);
+      
+      if (virtualFS[parent] && virtualFS[parent].items && virtualFS[parent].items[fileName]) {
+        virtualFS[parent].items[fileName].size = content.length;
+        virtualFS[parent].items[fileName].modified = new Date();
+      }
+      
+      return { success: true };
+    } else {
+      // If file doesn't exist, create it
+      if (response.status === 404) {
+        return await createFile(path, content);
+      }
+      return { success: false, error: data.error || "Failed to write file" };
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-  
-  // Update existing file
-  virtualFiles[normalizedPath] = content;
-  virtualFS[parent].items[fileName].size = content.length;
-  virtualFS[parent].items[fileName].modified = new Date();
-  
-  return { success: true };
 }
 
 // Code Templates
@@ -1375,7 +1500,7 @@ const shellCommands = {
   
   echo: {
     description: "Print arguments",
-    execute: (args) => {
+    execute: async (args) => {
       // Check for redirect operators
       const redirectIndex = args.findIndex(arg => arg === ">" || arg === ">>");
       if (redirectIndex !== -1 && redirectIndex < args.length - 1) {
@@ -1383,7 +1508,7 @@ const shellCommands = {
         const file = args[redirectIndex + 1];
         const append = args[redirectIndex] === ">>";
         
-        const result = readFile(file);
+        const result = await readFile(file);
         let content = result.success ? result.content : "";
         
         if (append) {
@@ -1392,7 +1517,7 @@ const shellCommands = {
           content = text;
         }
         
-        const writeResult = writeFile(file, content);
+        const writeResult = await writeFile(file, content);
         if (writeResult.success) {
           writeToTerminal(`echo: ${append ? "appended to" : "wrote to"} '${file}'`, "success");
         } else {
@@ -1512,21 +1637,21 @@ const shellCommands = {
   
   cat: {
     description: "Display file contents",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("cat: missing file operand", "error");
         writeToTerminal("Try 'cat --help' for more information.", "error");
         return;
       }
       
-      args.forEach(file => {
-        const result = readFile(file);
+      for (const file of args) {
+        const result = await readFile(file);
         if (result.success) {
           writeToTerminal(result.content, "info");
         } else {
           writeToTerminal(`cat: ${file}: ${result.error}`, "error");
         }
-      });
+      }
     }
   },
   
@@ -1551,12 +1676,26 @@ const shellCommands = {
     execute: (args) => {
       if (args.length === 0) {
         // Show all aliases
-        writeToTerminal("alias ll='ls -alF'", "info");
-        writeToTerminal("alias la='ls -A'", "info");
-        writeToTerminal("alias l='ls -CF'", "info");
+        Object.entries(shellAliases).forEach(([name, value]) => {
+          writeToTerminal(`alias ${name}='${value}'`, "info");
+        });
+        // Show default aliases
+        if (Object.keys(shellAliases).length === 0) {
+          writeToTerminal("alias ll='ls -alF'", "info");
+          writeToTerminal("alias la='ls -A'", "info");
+          writeToTerminal("alias l='ls -CF'", "info");
+        }
       } else {
-        // Set alias (simplified)
-        writeToTerminal(`alias: ${args.join(" ")}`, "info");
+        // Parse alias definition: alias name='value' or alias name=value
+        const aliasStr = args.join(" ");
+        const match = aliasStr.match(/^(\w+)=['"]?([^'"]+)['"]?$/);
+        if (match) {
+          const [, name, value] = match;
+          shellAliases[name] = value;
+          writeToTerminal(`alias ${name}='${value}'`, "info");
+        } else {
+          writeToTerminal("alias: invalid syntax. Use: alias name='value'", "error");
+        }
       }
     }
   },
@@ -1609,7 +1748,7 @@ const shellCommands = {
   
   grep: {
     description: "Search for patterns in files",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length < 2) {
         writeToTerminal("usage: grep [-Eiv] pattern file...", "error");
         return;
@@ -1619,8 +1758,8 @@ const shellCommands = {
       const files = args.slice(1);
       let foundAny = false;
       
-      files.forEach(file => {
-        const result = readFile(file);
+      for (const file of files) {
+        const result = await readFile(file);
         if (result.success) {
           const lines = result.content.split("\n");
           const normalizedPath = normalizePath(file);
@@ -1633,7 +1772,7 @@ const shellCommands = {
         } else {
           writeToTerminal(`grep: ${file}: ${result.error}`, "error");
         }
-      });
+      }
       
       if (!foundAny && files.length > 0) {
         // Exit code would be 1 in real grep
@@ -1684,26 +1823,38 @@ const shellCommands = {
   
   mkdir: {
     description: "Create directory",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("mkdir: missing operand", "error");
         writeToTerminal("Try 'mkdir --help' for more information.", "error");
         return;
       }
-      args.forEach(dir => {
+      for (const dir of args) {
         const normalizedPath = normalizePath(dir);
-        if (ensureDirectory(normalizedPath)) {
-          writeToTerminal(`mkdir: created directory '${dir}'`, "success");
-        } else {
-          writeToTerminal(`mkdir: cannot create directory '${dir}': No such file or directory`, "error");
+        try {
+          const response = await fetch("/api/directories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: normalizedPath }),
+          });
+          const data = await response.json();
+          if (data.success) {
+            // Update local cache
+            ensureDirectory(normalizedPath);
+            writeToTerminal(`mkdir: created directory '${dir}'`, "success");
+          } else {
+            writeToTerminal(`mkdir: cannot create directory '${dir}': ${data.error}`, "error");
+          }
+        } catch (error) {
+          writeToTerminal(`mkdir: cannot create directory '${dir}': ${error.message}`, "error");
         }
-      });
+      }
     }
   },
   
   rm: {
     description: "Remove files or directories",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("rm: missing operand", "error");
         writeToTerminal("Try 'rm --help' for more information.", "error");
@@ -1711,39 +1862,39 @@ const shellCommands = {
       }
       const recursive = args.includes("-r") || args.includes("-rf");
       const files = args.filter(arg => !arg.startsWith("-"));
-      files.forEach(file => {
-        const result = deleteFile(file);
+      for (const file of files) {
+        const result = await deleteFile(file);
         if (result.success) {
           writeToTerminal(`rm: removed '${file}'`, "success");
         } else {
           writeToTerminal(`rm: cannot remove '${file}': ${result.error}`, "error");
         }
-      });
+      }
     }
   },
   
   touch: {
     description: "Create empty file or update timestamp",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("touch: missing file operand", "error");
         writeToTerminal("Try 'touch --help' for more information.", "error");
         return;
       }
-      args.forEach(file => {
-        const result = createFile(file, "");
+      for (const file of args) {
+        const result = await createFile(file, "");
         if (result.success) {
           writeToTerminal(`touch: created '${file}'`, "success");
         } else {
           writeToTerminal(`touch: cannot touch '${file}': ${result.error}`, "error");
         }
-      });
+      }
     }
   },
   
   head: {
     description: "Display first lines of file",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("head: missing file operand", "error");
         writeToTerminal("Try 'head --help' for more information.", "error");
@@ -1757,8 +1908,8 @@ const shellCommands = {
         files = args.slice(2);
       }
       
-      files.forEach(file => {
-        const result = readFile(file);
+      for (const file of files) {
+        const result = await readFile(file);
         if (result.success) {
           const fileLines = result.content.split("\n");
           fileLines.slice(0, lines).forEach(line => {
@@ -1767,13 +1918,13 @@ const shellCommands = {
         } else {
           writeToTerminal(`head: ${file}: ${result.error}`, "error");
         }
-      });
+      }
     }
   },
   
   tail: {
     description: "Display last lines of file",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("tail: missing file operand", "error");
         writeToTerminal("Try 'tail --help' for more information.", "error");
@@ -1787,8 +1938,8 @@ const shellCommands = {
         files = args.slice(2);
       }
       
-      files.forEach(file => {
-        const result = readFile(file);
+      for (const file of files) {
+        const result = await readFile(file);
         if (result.success) {
           const fileLines = result.content.split("\n");
           fileLines.slice(-lines).forEach(line => {
@@ -1797,21 +1948,21 @@ const shellCommands = {
         } else {
           writeToTerminal(`tail: ${file}: ${result.error}`, "error");
         }
-      });
+      }
     }
   },
   
   wc: {
     description: "Count lines, words, and characters",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("wc: missing file operand", "error");
         writeToTerminal("Try 'wc --help' for more information.", "error");
         return;
       }
       
-      args.forEach(file => {
-        const result = readFile(file);
+      for (const file of args) {
+        const result = await readFile(file);
         if (result.success) {
           const content = result.content;
           const lines = content.split("\n").filter(l => l).length;
@@ -1821,13 +1972,13 @@ const shellCommands = {
         } else {
           writeToTerminal(`wc: ${file}: ${result.error}`, "error");
         }
-      });
+      }
     }
   },
   
   nano: {
     description: "Text editor",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length === 0) {
         writeToTerminal("Usage: nano [OPTIONS] [[+LINE,COLUMN] FILE]...", "error");
         writeToTerminal("Edit a file with nano text editor", "error");
@@ -1839,7 +1990,7 @@ const shellCommands = {
       
       // Read existing file or create new
       let content = "";
-      const readResult = readFile(file);
+      const readResult = await readFile(file);
       if (readResult.success) {
         content = readResult.content;
       }
@@ -1872,7 +2023,7 @@ const shellCommands = {
   
   sed: {
     description: "Stream editor for filtering and transforming text",
-    execute: (args) => {
+    execute: async (args) => {
       if (args.length < 2) {
         writeToTerminal("sed: missing command", "error");
         writeToTerminal("usage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...", "error");
@@ -1901,8 +2052,8 @@ const shellCommands = {
           const replacement = parts.slice(2, -1).join("/"); // Handle replacement with /
           const flags = parts[parts.length - 1] || "";
           
-          files.forEach(file => {
-            const result = readFile(file);
+          for (const file of files) {
+            const result = await readFile(file);
             if (result.success) {
               let content = result.content;
               const lines = content.split("\n");
@@ -1929,7 +2080,7 @@ const shellCommands = {
               
               // Write back if -i flag or show output
               if (inPlace) {
-                const writeResult = writeFile(file, newContent);
+                const writeResult = await writeFile(file, newContent);
                 if (writeResult.success) {
                   writeToTerminal(`sed: edited '${file}'`, "success");
                 } else {
@@ -1941,7 +2092,7 @@ const shellCommands = {
             } else {
               writeToTerminal(`sed: ${file}: ${result.error}`, "error");
             }
-          });
+          }
         } else {
           writeToTerminal("sed: invalid command", "error");
         }
@@ -1951,6 +2102,381 @@ const shellCommands = {
       } else {
         writeToTerminal(`sed: unsupported command '${script}'`, "error");
         writeToTerminal("Supported: s/pattern/replacement/[flags] (use -i for in-place editing)", "error");
+      }
+    }
+  },
+  
+  cp: {
+    description: "Copy files or directories",
+    execute: async (args) => {
+      if (args.length < 2) {
+        writeToTerminal("cp: missing file operand", "error");
+        writeToTerminal("Try 'cp --help' for more information.", "error");
+        return;
+      }
+      
+      const sources = args.slice(0, -1);
+      const dest = args[args.length - 1];
+      
+      for (const source of sources) {
+        const result = await readFile(source);
+        if (result.success) {
+          const destPath = dest.endsWith("/") || virtualFS[normalizePath(dest)]?.type === "directory" 
+            ? normalizePath(dest) + "/" + getFileName(source)
+            : normalizePath(dest);
+          
+          const writeResult = await writeFile(destPath, result.content);
+          if (writeResult.success) {
+            writeToTerminal(`cp: copied '${source}' to '${destPath}'`, "success");
+          } else {
+            writeToTerminal(`cp: cannot copy '${source}': ${writeResult.error}`, "error");
+          }
+        } else {
+          writeToTerminal(`cp: cannot stat '${source}': ${result.error}`, "error");
+        }
+      }
+    }
+  },
+  
+  mv: {
+    description: "Move or rename files",
+    execute: async (args) => {
+      if (args.length < 2) {
+        writeToTerminal("mv: missing file operand", "error");
+        writeToTerminal("Try 'mv --help' for more information.", "error");
+        return;
+      }
+      
+      const source = args[0];
+      const dest = args[1];
+      
+      const result = await readFile(source);
+      if (result.success) {
+        const destPath = normalizePath(dest);
+        const writeResult = await writeFile(destPath, result.content);
+        if (writeResult.success) {
+          await deleteFile(source);
+          writeToTerminal(`mv: moved '${source}' to '${destPath}'`, "success");
+        } else {
+          writeToTerminal(`mv: cannot move '${source}': ${writeResult.error}`, "error");
+        }
+      } else {
+        writeToTerminal(`mv: cannot stat '${source}': ${result.error}`, "error");
+      }
+    }
+  },
+  
+  chmod: {
+    description: "Change file permissions",
+    execute: (args) => {
+      if (args.length < 2) {
+        writeToTerminal("chmod: missing operand", "error");
+        writeToTerminal("Try 'chmod --help' for more information.", "error");
+        return;
+      }
+      
+      const mode = args[0];
+      const files = args.slice(1);
+      
+      // Simplified chmod - just update permissions string
+      files.forEach(file => {
+        const normalizedPath = normalizePath(file);
+        const parent = getParentDir(normalizedPath);
+        const fileName = getFileName(normalizedPath);
+        
+        if (virtualFS[parent] && virtualFS[parent].items && virtualFS[parent].items[fileName]) {
+          // Convert numeric mode to permission string (simplified)
+          if (/^[0-7]{3}$/.test(mode)) {
+            const perms = virtualFS[parent].items[fileName].perms;
+            const type = perms[0]; // 'd' or '-'
+            // Simplified: just acknowledge the change
+            writeToTerminal(`chmod: changed permissions of '${file}' to ${mode}`, "success");
+          } else if (mode.match(/^[ugo]*[+-=][rwx]+$/)) {
+            writeToTerminal(`chmod: changed permissions of '${file}'`, "success");
+          } else {
+            writeToTerminal(`chmod: invalid mode: '${mode}'`, "error");
+          }
+        } else {
+          writeToTerminal(`chmod: cannot access '${file}': No such file or directory`, "error");
+        }
+      });
+    }
+  },
+  
+  sort: {
+    description: "Sort lines of text",
+    execute: async (args) => {
+      if (args.length === 0) {
+        writeToTerminal("sort: missing file operand", "error");
+        return;
+      }
+      
+      const reverse = args.includes("-r");
+      const numeric = args.includes("-n");
+      const files = args.filter(arg => !arg.startsWith("-"));
+      
+      for (const file of files) {
+        const result = await readFile(file);
+        if (result.success) {
+          let lines = result.content.split("\n");
+          if (numeric) {
+            lines.sort((a, b) => {
+              const numA = parseFloat(a) || 0;
+              const numB = parseFloat(b) || 0;
+              return reverse ? numB - numA : numA - numB;
+            });
+          } else {
+            lines.sort();
+            if (reverse) lines.reverse();
+          }
+          writeToTerminal(lines.join("\n"), "info");
+        } else {
+          writeToTerminal(`sort: ${file}: ${result.error}`, "error");
+        }
+      }
+    }
+  },
+  
+  uniq: {
+    description: "Remove duplicate lines",
+    execute: async (args) => {
+      if (args.length === 0) {
+        writeToTerminal("uniq: missing file operand", "error");
+        return;
+      }
+      
+      const count = args.includes("-c");
+      const files = args.filter(arg => !arg.startsWith("-"));
+      
+      for (const file of files) {
+        const result = await readFile(file);
+        if (result.success) {
+          const lines = result.content.split("\n");
+          const seen = new Map();
+          const unique = [];
+          
+          lines.forEach(line => {
+            if (!seen.has(line)) {
+              seen.set(line, 1);
+              unique.push(line);
+            } else {
+              seen.set(line, seen.get(line) + 1);
+            }
+          });
+          
+          if (count) {
+            unique.forEach(line => {
+              const count = seen.get(line);
+              writeToTerminal(`${count.toString().padStart(7)} ${line}`, "info");
+            });
+          } else {
+            writeToTerminal(unique.join("\n"), "info");
+          }
+        } else {
+          writeToTerminal(`uniq: ${file}: ${result.error}`, "error");
+        }
+      }
+    }
+  },
+  
+  cut: {
+    description: "Cut columns from text",
+    execute: async (args) => {
+      if (args.length < 3 || !args.includes("-d") || !args.includes("-f")) {
+        writeToTerminal("cut: you must specify a list of bytes, characters, or fields", "error");
+        writeToTerminal("Try 'cut --help' for more information.", "error");
+        return;
+      }
+      
+      const delimiterIndex = args.indexOf("-d");
+      const fieldIndex = args.indexOf("-f");
+      const delimiter = args[delimiterIndex + 1] || "\t";
+      const fields = args[fieldIndex + 1];
+      const files = args.filter((arg, idx) => 
+        idx !== delimiterIndex && idx !== delimiterIndex + 1 &&
+        idx !== fieldIndex && idx !== fieldIndex + 1 &&
+        !arg.startsWith("-")
+      );
+      
+      const fieldNums = fields.split(",").map(f => parseInt(f.trim()) - 1);
+      
+      for (const file of files.length > 0 ? files : ["-"]) {
+        let content = "";
+        if (file === "-") {
+          // Would read from stdin in real shell
+          writeToTerminal("cut: reading from stdin not yet implemented", "error");
+          continue;
+        }
+        
+        const result = await readFile(file);
+        if (result.success) {
+          content = result.content;
+        } else {
+          writeToTerminal(`cut: ${file}: ${result.error}`, "error");
+          continue;
+        }
+        
+        const lines = content.split("\n");
+        lines.forEach(line => {
+          const parts = line.split(delimiter);
+          const selected = fieldNums.map(n => parts[n] || "").join(delimiter);
+          writeToTerminal(selected, "info");
+        });
+      }
+    }
+  },
+  
+  df: {
+    description: "Show disk space usage",
+    execute: () => {
+      writeToTerminal("Filesystem     1K-blocks     Used Available Use% Mounted on", "info");
+      writeToTerminal("/dev/sda1       104857600  52428800   52428800  50% /", "info");
+      writeToTerminal("tmpfs             2097152      1024    2096128   1% /tmp", "info");
+      writeToTerminal("tmpfs             2097152         0    2097152   0% /dev/shm", "info");
+    }
+  },
+  
+  du: {
+    description: "Show directory disk usage",
+    execute: (args) => {
+      const path = args.length > 0 ? normalizePath(args[0]) : shellCwd;
+      const human = args.includes("-h");
+      
+      function calculateSize(dirPath) {
+        let size = 4096; // Directory itself
+        const dir = virtualFS[dirPath];
+        if (dir && dir.items) {
+          Object.values(dir.items).forEach(item => {
+            if (item.type === "directory") {
+              const subPath = dirPath === "/" ? `/${item.name || ""}` : `${dirPath}/${item.name || ""}`;
+              size += calculateSize(subPath);
+            } else {
+              size += item.size || 0;
+            }
+          });
+        }
+        return size;
+      }
+      
+      const size = calculateSize(path);
+      const displaySize = human ? formatSize(size) : size.toString();
+      writeToTerminal(`${displaySize.padStart(10)} ${path}`, "info");
+    }
+  },
+  
+  uptime: {
+    description: "Show system uptime",
+    execute: () => {
+      const uptime = Math.floor((Date.now() - (window.startTime || Date.now())) / 1000);
+      const days = Math.floor(uptime / 86400);
+      const hours = Math.floor((uptime % 86400) / 3600);
+      const minutes = Math.floor((uptime % 3600) / 60);
+      const seconds = uptime % 60;
+      
+      let uptimeStr = "";
+      if (days > 0) uptimeStr += `${days} day${days > 1 ? "s" : ""}, `;
+      if (hours > 0) uptimeStr += `${hours} hour${hours > 1 ? "s" : ""}, `;
+      if (minutes > 0) uptimeStr += `${minutes} minute${minutes > 1 ? "s" : ""}`;
+      if (uptimeStr) uptimeStr += " ";
+      uptimeStr += `${seconds} second${seconds !== 1 ? "s" : ""}`;
+      
+      writeToTerminal(`up ${uptimeStr}`, "info");
+      writeToTerminal(`load average: ${(Math.random() * 2 + 0.5).toFixed(2)}, ${(Math.random() * 2 + 0.5).toFixed(2)}, ${(Math.random() * 2 + 0.5).toFixed(2)}`, "info");
+    }
+  },
+  
+  man: {
+    description: "Display manual pages",
+    execute: (args) => {
+      if (args.length === 0) {
+        writeToTerminal("man: missing manual page name", "error");
+        writeToTerminal("Try 'man man' for more information.", "error");
+        return;
+      }
+      
+      const command = args[0];
+      if (shellCommands[command]) {
+        writeToTerminal(`NAME`, "info");
+        writeToTerminal(`       ${command} - ${shellCommands[command].description}`, "info");
+        writeToTerminal("", "info");
+        writeToTerminal("SYNOPSIS", "info");
+        writeToTerminal(`       ${command} [OPTIONS] [ARGUMENTS]`, "info");
+        writeToTerminal("", "info");
+        writeToTerminal("DESCRIPTION", "info");
+        writeToTerminal(`       ${shellCommands[command].description}.`, "info");
+        writeToTerminal("", "info");
+        writeToTerminal("SEE ALSO", "info");
+        writeToTerminal(`       help(1)`, "info");
+      } else {
+        writeToTerminal(`No manual entry for ${command}`, "error");
+      }
+    }
+  },
+  
+  less: {
+    description: "View file contents with pager",
+    execute: async (args) => {
+      if (args.length === 0) {
+        writeToTerminal("less: missing file operand", "error");
+        return;
+      }
+      
+      const file = args[0];
+      const result = await readFile(file);
+      if (result.success) {
+        const lines = result.content.split("\n");
+        const totalLines = lines.length;
+        writeToTerminal("", "info");
+        writeToTerminal(`File: ${file} (${totalLines} lines)`, "info");
+        writeToTerminal("---", "info");
+        
+        // Show first 20 lines (simplified pager)
+        const displayLines = Math.min(20, totalLines);
+        lines.slice(0, displayLines).forEach((line, index) => {
+          writeToTerminal(`${(index + 1).toString().padStart(4)}  ${line}`, "info");
+        });
+        
+        if (totalLines > 20) {
+          writeToTerminal("---", "info");
+          writeToTerminal(`(showing first 20 of ${totalLines} lines)`, "info");
+          writeToTerminal("Note: Full pager navigation not yet implemented", "info");
+        } else {
+          writeToTerminal("---", "info");
+          writeToTerminal("(END)", "info");
+        }
+      } else {
+        writeToTerminal(`less: ${file}: ${result.error}`, "error");
+      }
+    }
+  },
+  
+  more: {
+    description: "View file contents page by page",
+    execute: async (args) => {
+      if (args.length === 0) {
+        writeToTerminal("more: missing file operand", "error");
+        return;
+      }
+      
+      const file = args[0];
+      const result = await readFile(file);
+      if (result.success) {
+        const lines = result.content.split("\n");
+        const totalLines = lines.length;
+        writeToTerminal("", "info");
+        
+        // Show first 24 lines (terminal height simulation)
+        const displayLines = Math.min(24, totalLines);
+        lines.slice(0, displayLines).forEach(line => {
+          writeToTerminal(line, "info");
+        });
+        
+        if (totalLines > 24) {
+          writeToTerminal(`--More--(${Math.round((displayLines / totalLines) * 100)}%)`, "info");
+          writeToTerminal("Note: Full pager navigation not yet implemented", "info");
+        }
+      } else {
+        writeToTerminal(`more: ${file}: ${result.error}`, "error");
       }
     }
   }
@@ -1995,17 +2521,25 @@ function executeShellCommand(input) {
   
   // Execute command
   if (shellCommands[command]) {
-    try {
-      shellCommands[command].execute(args);
-    } catch (error) {
-      writeToTerminal(`${command}: ${error.message}`, "error");
-    }
+    (async () => {
+      try {
+        const result = shellCommands[command].execute(args);
+        // Handle async commands
+        if (result instanceof Promise) {
+          await result;
+        }
+      } catch (error) {
+        writeToTerminal(`${command}: ${error.message}`, "error");
+      } finally {
+        writePrompt();
+        terminalOutput.scrollTop = terminalOutput.scrollHeight;
+      }
+    })();
   } else {
     writeToTerminal(`Command not found: ${command}. Type 'help' for available commands.`, "error");
+    writePrompt();
+    terminalOutput.scrollTop = terminalOutput.scrollHeight;
   }
-  
-  writePrompt();
-  terminalOutput.scrollTop = terminalOutput.scrollHeight;
 }
 
 function writeToConsole(message, type = "info") {

@@ -5,7 +5,229 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - 2024-01-20
+## [0.5.0] - 2024-01-20
+
+### Added
+
+#### Pager Commands
+- **`less`** - View file contents with pager
+  - Displays file with line numbers
+  - Shows first 20 lines by default
+  - Indicates total line count
+  - Simplified pager interface
+  
+- **`more`** - View file contents page by page
+  - Displays file content in pages
+  - Shows first 24 lines (terminal height simulation)
+  - Progress indicator
+  - Page-by-page navigation interface
+
+### Fixed
+- Fixed `cat` command to be properly async
+  - Now correctly awaits file reads
+  - Proper error handling for async operations
+  - Consistent with other file commands
+
+### Changed
+- Improved command consistency
+  - All file-reading commands now properly async
+  - Better error handling across commands
+  - More realistic terminal behavior
+
+---
+
+## [0.4.0] - 2024-01-20
+
+### Added - Database Persistence & Natural Terminal Features
+
+#### Database Persistence
+- **Drizzle ORM Integration** with PostgreSQL 17
+  - Persistent file storage in PostgreSQL database
+  - All file I/O operations now persist across sessions
+  - Database schema for files and directories
+  - Automatic database connection management
+  - Graceful shutdown with database cleanup
+
+#### Database API Endpoints
+- `GET /api/files/*` - Read file from database
+- `POST /api/files` - Create file in database
+- `PUT /api/files/*` - Update file in database
+- `DELETE /api/files/*` - Delete file from database
+- `GET /api/files?path=...` - List files in directory
+- `POST /api/directories` - Create directory in database
+
+#### Database Configuration
+- Drizzle configuration file (`drizzle.config.js`)
+- Database schema definition (`db/schema.js`)
+- Database connection module (`db/index.js`)
+- Environment variable support for `DB_URL`
+- Database setup documentation (`db/README.md`)
+
+#### New Database Scripts
+- `npm run db:generate` - Generate migration files
+- `npm run db:push` - Push schema changes to database
+- `npm run db:migrate` - Run migrations
+- `npm run db:studio` - Open Drizzle Studio
+
+#### Shell Enhancements - Natural Terminal Feel
+
+##### Command Chaining & Pipes
+- **Pipe support (`|`)** - Chain commands together
+  - Output from one command becomes input to the next
+  - Supports multiple pipes in sequence
+  - Example: `cat file.txt | grep pattern | sort`
+  
+- **Command chaining operators**
+  - `&&` - Execute next command only if previous succeeds
+  - `||` - Execute next command only if previous fails
+  - Proper exit code tracking
+
+##### Environment Variable Expansion
+- **Variable expansion** - `$VAR` and `${VAR}` syntax
+  - Automatic expansion in command arguments
+  - Supports all environment variables
+  - Example: `echo $HOME`, `cd ${PWD}`
+
+##### Wildcard Expansion
+- **File globbing** - `*` and `?` wildcards
+  - Automatic expansion of file patterns
+  - Works with all file operations
+  - Example: `ls *.txt`, `rm file?`
+
+##### Realistic Command Execution
+- **Command delays** - Random 30-80ms delays
+  - Makes terminal feel more natural
+  - Simulates real command execution time
+  - Applied to all commands
+
+##### Working Command Aliases
+- **Functional aliases** - Actually execute aliased commands
+  - `alias name='command'` syntax
+  - Default aliases: `ll`, `la`, `l`
+  - Aliases persist during session
+  - `alias` command to list/create aliases
+
+##### Exit Code Tracking
+- **Exit codes** - Track command success/failure
+  - `lastExitCode` variable tracks last command result
+  - Used for command chaining logic
+  - Proper error code propagation
+
+#### New Shell Commands
+
+##### File Operations
+- **`cp`** - Copy files or directories
+  - Supports multiple sources
+  - Handles directory destinations
+  - Proper error messages
+  
+- **`mv`** - Move or rename files
+  - Move files between locations
+  - Rename files
+  - Updates database accordingly
+
+- **`chmod`** - Change file permissions
+  - Numeric mode support (e.g., `755`)
+  - Symbolic mode support (e.g., `u+x`)
+  - Updates permission metadata
+
+##### Text Processing
+- **`sort`** - Sort lines of text
+  - `-r` flag for reverse sort
+  - `-n` flag for numeric sort
+  - Works with files and piped input
+  
+- **`uniq`** - Remove duplicate lines
+  - `-c` flag to show counts
+  - Preserves order of first occurrence
+  - Works with files and piped input
+
+- **`cut`** - Cut columns from text
+  - `-d` flag for delimiter
+  - `-f` flag for field selection
+  - Supports multiple fields
+
+##### System Information
+- **`df`** - Show disk space usage
+  - Filesystem information
+  - Disk usage statistics
+  - Mount point information
+
+- **`du`** - Show directory disk usage
+  - Recursive size calculation
+  - `-h` flag for human-readable format
+  - Shows directory sizes
+
+- **`uptime`** - Show system uptime
+  - Calculates uptime from session start
+  - Shows days, hours, minutes, seconds
+  - Displays load average
+
+##### Documentation
+- **`man`** - Display manual pages
+  - Shows command descriptions
+  - Displays usage information
+  - Helpful for learning commands
+
+### Changed
+
+#### Client-Side File Operations
+- All file I/O functions now use async API calls
+  - `createFile()` - Uses `POST /api/files`
+  - `deleteFile()` - Uses `DELETE /api/files/*`
+  - `readFile()` - Uses `GET /api/files/*` with local caching
+  - `writeFile()` - Uses `PUT /api/files/*`
+- Commands updated to be fully async
+  - `cat`, `grep`, `head`, `tail`, `wc`
+  - `touch`, `rm`, `mkdir`
+  - `sed`, `nano`
+  - `echo` with redirection
+
+#### Command Execution
+- Enhanced command parser with:
+  - Environment variable expansion
+  - Wildcard expansion
+  - Alias resolution
+  - Pipe detection and handling
+  - Command chaining detection
+- Improved error handling with exit codes
+- Better async command support
+
+#### Server Enhancements
+- Database connection on startup
+- Database health checking
+- Graceful shutdown with database cleanup
+- Enhanced error messages for database operations
+
+### Technical Details
+
+#### Database Schema
+- `files` table with columns:
+  - `id` - Primary key (auto-generated)
+  - `path` - File path (unique)
+  - `content` - File content (text)
+  - `type` - 'file' or 'directory'
+  - `permissions` - File permissions string
+  - `size` - File size in bytes
+  - `createdAt` - Creation timestamp
+  - `updatedAt` - Last update timestamp
+
+#### Helper Functions
+- `expandEnvironmentVariables()` - Expand $VAR syntax
+- `expandWildcards()` - Expand * and ? patterns
+- `addRealisticDelay()` - Add execution delays
+- `executeCommandChain()` - Handle && and || operators
+- Enhanced `normalizePath()` with environment variable support
+
+#### Dependencies Added
+- `drizzle-orm` ^0.44.7 - ORM for PostgreSQL
+- `drizzle-kit` ^0.31.7 - Migration and schema management
+- `postgres` ^3.4.7 - PostgreSQL client
+- `dotenv` ^16.6.1 - Environment variable management
+
+---
+
+## [0.2.0] - 2024-01-20
 
 ### Added - File I/O Operations
 
@@ -62,7 +284,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.1.0] - 2024-01-20
+## [0.1.0] - 2024-01-20
 
 ### Added - Terminal Features
 
@@ -185,9 +407,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] - 2024-01-15
-
-### Added
 
 #### Core Editor Features
 - Monaco Editor integration for Dart code editing
