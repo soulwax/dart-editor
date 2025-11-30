@@ -1,6 +1,6 @@
 {
   "name": "soulwax-dart-editor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Dart Editor web application for Dart compilation",
   "main": "server.js",
   "scripts": {

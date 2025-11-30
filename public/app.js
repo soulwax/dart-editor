@@ -1,3 +1,5 @@
+// File: public/app.js
+
 // Dart Editor instances
 let dartEditor = null;
 let outputEditor = null;
@@ -933,6 +935,97 @@ let shellEnv = {}; // Environment variables
 let nodeReplMode = false; // Node.js REPL mode
 let nodeReplHistory = []; // REPL command history
 let nodeReplHistoryIndex = -1;
+let tabCompletionIndex = -1;
+let tabCompletionMatches = [];
+
+// Enhanced Virtual File System with metadata
+const virtualFS = {
+  "/": {
+    type: "directory",
+    items: {
+      "home": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-15") },
+      "usr": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-10") },
+      "bin": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-12") },
+      "etc": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-08") },
+      "var": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-05") },
+      "tmp": { type: "directory", perms: "drwxrwxrwx", size: 4096, modified: new Date("2024-01-20") },
+      "opt": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-14") }
+    }
+  },
+  "/home": {
+    type: "directory",
+    items: {
+      "user": { type: "directory", perms: "drwx------", size: 4096, modified: new Date("2024-01-18") }
+    }
+  },
+  "/usr": {
+    type: "directory",
+    items: {
+      "bin": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-10") },
+      "lib": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-10") },
+      "share": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-10") }
+    }
+  },
+  "/bin": {
+    type: "directory",
+    items: {
+      "sh": { type: "file", perms: "-rwxr-xr-x", size: 125856, modified: new Date("2024-01-12") },
+      "bash": { type: "file", perms: "-rwxr-xr-x", size: 1396524, modified: new Date("2024-01-12") },
+      "ls": { type: "file", perms: "-rwxr-xr-x", size: 141936, modified: new Date("2024-01-12") },
+      "cat": { type: "file", perms: "-rwxr-xr-x", size: 35064, modified: new Date("2024-01-12") },
+      "echo": { type: "file", perms: "-rwxr-xr-x", size: 31400, modified: new Date("2024-01-12") },
+      "node": { type: "file", perms: "-rwxr-xr-x", size: 4567890, modified: new Date("2024-01-15") }
+    }
+  },
+  "/etc": {
+    type: "directory",
+    items: {
+      "passwd": { type: "file", perms: "-rw-r--r--", size: 2345, modified: new Date("2024-01-08") },
+      "hosts": { type: "file", perms: "-rw-r--r--", size: 158, modified: new Date("2024-01-08") },
+      "group": { type: "file", perms: "-rw-r--r--", size: 1024, modified: new Date("2024-01-08") }
+    }
+  },
+  "/var": {
+    type: "directory",
+    items: {
+      "log": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-05") },
+      "tmp": { type: "directory", perms: "drwxrwxrwx", size: 4096, modified: new Date("2024-01-05") }
+    }
+  },
+  "/var/log": {
+    type: "directory",
+    items: {
+      "system.log": { type: "file", perms: "-rw-r--r--", size: 15234, modified: new Date("2024-01-20") },
+      "auth.log": { type: "file", perms: "-rw-------", size: 4567, modified: new Date("2024-01-20") },
+      "syslog": { type: "file", perms: "-rw-r--r--", size: 23456, modified: new Date("2024-01-20") }
+    }
+  },
+  "/tmp": {
+    type: "directory",
+    items: {}
+  },
+  "/home/user": {
+    type: "directory",
+    items: {
+      "Documents": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-18") },
+      "Downloads": { type: "directory", perms: "drwxr-xr-x", size: 4096, modified: new Date("2024-01-19") },
+      ".bashrc": { type: "file", perms: "-rw-r--r--", size: 3526, modified: new Date("2024-01-18") },
+      ".profile": { type: "file", perms: "-rw-r--r--", size: 675, modified: new Date("2024-01-18") }
+    }
+  }
+};
+
+// Virtual file contents
+const virtualFiles = {
+  "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nuser:x:1000:1000:user:/home/user:/bin/bash\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin",
+  "/etc/hosts": "127.0.0.1\tlocalhost\n127.0.1.1\tbattlecry-editor\n::1\t\tlocalhost ip6-localhost ip6-loopback",
+  "/etc/group": "root:x:0:\nuser:x:1000:\nadm:x:4:user",
+  "/var/log/system.log": "2024-01-20 10:23:15 System started successfully\n2024-01-20 10:23:16 All services running\n2024-01-20 10:25:30 User login: user\n2024-01-20 10:30:45 Network interface up\n",
+  "/var/log/auth.log": "2024-01-20 10:25:30 Successful login for user\n2024-01-20 10:25:31 Session started\n",
+  "/var/log/syslog": "Jan 20 10:23:15 kernel: Linux version 6.8.0\nJan 20 10:23:16 systemd: System initialized\nJan 20 10:25:30 sshd: Accepted publickey for user\n",
+  "/home/user/.bashrc": "# ~/.bashrc\n\nexport PATH=$PATH:/usr/local/bin\nalias ll='ls -alF'\nalias la='ls -A'\nalias l='ls -CF'\n",
+  "/home/user/.profile": "# ~/.profile\n\nif [ -n \"$BASH_VERSION\" ]; then\n  . ~/.bashrc\nfi\n"
+};
 
 // Code Templates
 const CODE_TEMPLATES = {
@@ -1053,9 +1146,14 @@ function writePrompt() {
   const promptLine = document.createElement("div");
   promptLine.className = "terminal-prompt-line";
   if (nodeReplMode) {
-    promptLine.innerHTML = `<span class="terminal-prompt-text">></span>`;
+    // Nerd Font:  = prompt symbol
+    promptLine.innerHTML = `<span class="terminal-prompt-text"> ></span>`;
   } else {
-    promptLine.innerHTML = `<span class="terminal-prompt-text">${shellCwd} $</span>`;
+    const user = shellEnv.USER || "user";
+    const host = shellEnv.HOSTNAME || "battlecry";
+    const cwd = shellCwd === "/" ? "/" : shellCwd;
+    // Nerd Font:  = prompt symbol
+    promptLine.innerHTML = `<span class="terminal-prompt-text"> ${user}@${host}</span><span style="color: var(--accent-blue);">:</span><span class="terminal-prompt-text" style="color: var(--accent-purple);">${cwd}</span><span class="terminal-prompt-text"> $</span>`;
   }
   terminalHistory.appendChild(promptLine);
   terminalOutput.scrollTop = terminalOutput.scrollHeight;
@@ -1064,7 +1162,8 @@ function writePrompt() {
 function writeReplPrompt() {
   const promptLine = document.createElement("div");
   promptLine.className = "terminal-prompt-line";
-  promptLine.innerHTML = `<span class="terminal-prompt-text">></span>`;
+  // Nerd Font:  = prompt symbol for REPL
+  promptLine.innerHTML = `<span class="terminal-prompt-text"> ></span>`;
   terminalHistory.appendChild(promptLine);
   terminalOutput.scrollTop = terminalOutput.scrollHeight;
 }
@@ -1177,49 +1276,97 @@ const shellCommands = {
     description: "Change directory",
     execute: (args) => {
       if (args.length === 0) {
-        shellCwd = "/";
-      } else {
-        const path = args[0];
-        if (path === "/") {
-          shellCwd = "/";
-        } else if (path === "..") {
-          if (shellCwd !== "/") {
-            const parts = shellCwd.split("/").filter(p => p);
-            parts.pop();
-            shellCwd = parts.length > 0 ? "/" + parts.join("/") : "/";
-          }
-        } else if (path.startsWith("/")) {
-          shellCwd = path;
-        } else {
-          shellCwd = shellCwd === "/" ? "/" + path : shellCwd + "/" + path;
-        }
+        shellCwd = "/home/user";
+        return;
       }
+      
+      const path = args[0];
+      let targetPath;
+      
+      if (path === "/") {
+        targetPath = "/";
+      } else if (path === "~" || path === "~user") {
+        targetPath = "/home/user";
+      } else if (path === "-") {
+        targetPath = shellEnv.OLDPWD || shellCwd;
+        shellEnv.OLDPWD = shellCwd;
+      } else if (path === "..") {
+        if (shellCwd !== "/") {
+          const parts = shellCwd.split("/").filter(p => p);
+          parts.pop();
+          targetPath = parts.length > 0 ? "/" + parts.join("/") : "/";
+        } else {
+          targetPath = "/";
+        }
+      } else if (path.startsWith("/")) {
+        targetPath = path;
+      } else {
+        targetPath = shellCwd === "/" ? "/" + path : shellCwd + "/" + path;
+      }
+      
+      // Validate directory exists
+      const dir = virtualFS[targetPath];
+      if (!dir || dir.type !== "directory") {
+        writeToTerminal(`cd: ${path}: No such file or directory`, "error");
+        return;
+      }
+      
+      shellEnv.OLDPWD = shellCwd;
+      shellCwd = targetPath;
     }
   },
   
   ls: {
     description: "List directory contents",
     execute: (args) => {
-      // Virtual file system
-      const virtualFS = {
-        "/": ["home", "usr", "bin", "etc", "var", "tmp"],
-        "/home": ["user"],
-        "/usr": ["bin", "lib", "share"],
-        "/bin": ["sh", "bash", "ls", "cat", "echo"],
-        "/etc": ["passwd", "hosts"],
-        "/var": ["log", "tmp"],
-        "/tmp": []
-      };
+      const showAll = args.includes("-a") || args.includes("--all");
+      const longFormat = args.includes("-l") || args.includes("--long");
+      const humanReadable = args.includes("-h") || args.includes("--human-readable");
+      const color = !args.includes("--no-color");
       
-      const path = args.length > 0 ? args[0] : shellCwd;
+      const pathArgs = args.filter(arg => !arg.startsWith("-"));
+      const path = pathArgs.length > 0 ? pathArgs[0] : shellCwd;
       const normalizedPath = path.startsWith("/") ? path : (shellCwd === "/" ? "/" + path : shellCwd + "/" + path);
       
-      if (virtualFS[normalizedPath]) {
-        virtualFS[normalizedPath].forEach(item => {
-          writeToTerminal(item, "info");
-        });
-      } else {
+      const dir = virtualFS[normalizedPath];
+      if (!dir || dir.type !== "directory") {
         writeToTerminal(`ls: cannot access '${path}': No such file or directory`, "error");
+        return;
+      }
+      
+      const items = Object.entries(dir.items || {})
+        .filter(([name]) => showAll || !name.startsWith("."))
+        .sort(([a], [b]) => {
+          // Directories first, then files
+          if (dir.items[a].type !== dir.items[b].type) {
+            return dir.items[a].type === "directory" ? -1 : 1;
+          }
+          return a.localeCompare(b);
+        });
+      
+      if (longFormat) {
+        // Long format with permissions, size, date
+        items.forEach(([name, info]) => {
+          const size = humanReadable ? formatSize(info.size) : info.size.toString();
+          const date = formatDate(info.modified);
+          const type = info.type === "directory" ? "d" : "-";
+          // Nerd Font icons:  = folder,  = file
+          const icon = info.type === "directory" ? " " : " ";
+          writeToTerminal(`${info.perms} ${size.padStart(8)} ${date} ${icon} ${name}`, "info");
+        });
+        // Show total
+        writeToTerminal(`total ${items.length}`, "info");
+      } else {
+        // Simple format with Nerd Font icons
+        items.forEach(([name, info]) => {
+          if (color) {
+            // Nerd Font icons:  = folder,  = file
+            const icon = info.type === "directory" ? " " : " ";
+            writeToTerminal(`${icon} ${name}`, "info");
+          } else {
+            writeToTerminal(name, "info");
+          }
+        });
       }
     }
   },
@@ -1229,30 +1376,50 @@ const shellCommands = {
     execute: (args) => {
       if (args.length === 0) {
         writeToTerminal("cat: missing file operand", "error");
+        writeToTerminal("Try 'cat --help' for more information.", "error");
         return;
       }
       
-      // Virtual file contents
-      const virtualFiles = {
-        "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nuser:x:1000:1000:user:/home/user:/bin/bash",
-        "/etc/hosts": "127.0.0.1 localhost\n::1 localhost",
-        "/var/log/system.log": "System started successfully\nAll services running\n"
-      };
-      
-      const filePath = args[0].startsWith("/") ? args[0] : (shellCwd === "/" ? "/" + args[0] : shellCwd + "/" + args[0]);
-      
-      if (virtualFiles[filePath]) {
-        writeToTerminal(virtualFiles[filePath], "info");
-      } else {
-        writeToTerminal(`cat: ${args[0]}: No such file or directory`, "error");
-      }
+      args.forEach(file => {
+        const filePath = file.startsWith("/") ? file : (shellCwd === "/" ? "/" + file : shellCwd + "/" + file);
+        
+        if (virtualFiles[filePath]) {
+          writeToTerminal(virtualFiles[filePath], "info");
+        } else {
+          writeToTerminal(`cat: ${file}: No such file or directory`, "error");
+        }
+      });
     }
   },
   
   whoami: {
     description: "Print current user",
     execute: () => {
-      writeToTerminal("user", "info");
+      writeToTerminal(shellEnv.USER || "user", "info");
+    }
+  },
+  
+  env: {
+    description: "Display environment variables",
+    execute: () => {
+      Object.entries(shellEnv).forEach(([key, value]) => {
+        writeToTerminal(`${key}=${value}`, "info");
+      });
+    }
+  },
+  
+  alias: {
+    description: "Create command aliases",
+    execute: (args) => {
+      if (args.length === 0) {
+        // Show all aliases
+        writeToTerminal("alias ll='ls -alF'", "info");
+        writeToTerminal("alias la='ls -A'", "info");
+        writeToTerminal("alias l='ls -CF'", "info");
+      } else {
+        // Set alias (simplified)
+        writeToTerminal(`alias: ${args.join(" ")}`, "info");
+      }
     }
   },
   
@@ -1306,17 +1473,13 @@ const shellCommands = {
     description: "Search for patterns in files",
     execute: (args) => {
       if (args.length < 2) {
-        writeToTerminal("grep: usage: grep pattern file...", "error");
+        writeToTerminal("usage: grep [-Eiv] pattern file...", "error");
         return;
       }
       
       const pattern = args[0];
       const files = args.slice(1);
-      const virtualFiles = {
-        "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nuser:x:1000:1000:user:/home/user:/bin/bash",
-        "/etc/hosts": "127.0.0.1 localhost\n::1 localhost",
-        "/var/log/system.log": "System started successfully\nAll services running\n"
-      };
+      let foundAny = false;
       
       files.forEach(file => {
         const filePath = file.startsWith("/") ? file : (shellCwd === "/" ? "/" + file : shellCwd + "/" + file);
@@ -1325,12 +1488,17 @@ const shellCommands = {
           lines.forEach((line, index) => {
             if (line.includes(pattern)) {
               writeToTerminal(`${filePath}:${index + 1}:${line}`, "info");
+              foundAny = true;
             }
           });
         } else {
           writeToTerminal(`grep: ${file}: No such file or directory`, "error");
         }
       });
+      
+      if (!foundAny && files.length > 0) {
+        // Exit code would be 1 in real grep
+      }
     }
   },
   
@@ -1338,39 +1506,40 @@ const shellCommands = {
     description: "Search for files in directory tree",
     execute: (args) => {
       if (args.length < 2) {
-        writeToTerminal("find: usage: find path -name pattern", "error");
+        writeToTerminal("find: missing argument to `-name'", "error");
+        writeToTerminal("usage: find [-H] [-L] [-P] [-Olevel] [-D help|tree|search|stat|rates|opt|exec] [path...] [expression]", "error");
         return;
       }
       
       const path = args[0];
       const nameIndex = args.indexOf("-name");
       if (nameIndex === -1 || nameIndex === args.length - 1) {
-        writeToTerminal("find: missing argument to -name", "error");
+        writeToTerminal("find: missing argument to `-name'", "error");
         return;
       }
       
-      const pattern = args[nameIndex + 1];
-      const virtualFS = {
-        "/": ["home", "usr", "bin", "etc", "var", "tmp"],
-        "/home": ["user"],
-        "/usr": ["bin", "lib", "share"],
-        "/bin": ["sh", "bash", "ls", "cat", "echo", "node"],
-        "/etc": ["passwd", "hosts"],
-        "/var": ["log", "tmp"],
-        "/tmp": []
-      };
-      
+      const pattern = args[nameIndex + 1].replace(/\*/g, "");
       const searchPath = path.startsWith("/") ? path : (shellCwd === "/" ? "/" + path : shellCwd + "/" + path);
       const normalizedPath = searchPath === "." ? shellCwd : searchPath;
       
-      if (virtualFS[normalizedPath]) {
-        virtualFS[normalizedPath].forEach(item => {
-          if (item.includes(pattern.replace(/\*/g, ""))) {
-            const fullPath = normalizedPath === "/" ? `/${item}` : `${normalizedPath}/${item}`;
+      function searchDir(dirPath, depth = 0) {
+        if (depth > 10) return; // Prevent infinite recursion
+        const dir = virtualFS[dirPath];
+        if (!dir || dir.type !== "directory") return;
+        
+        Object.entries(dir.items || {}).forEach(([name, info]) => {
+          if (name.includes(pattern)) {
+            const fullPath = dirPath === "/" ? `/${name}` : `${dirPath}/${name}`;
             writeToTerminal(fullPath, "info");
+          }
+          if (info.type === "directory") {
+            const subPath = dirPath === "/" ? `/${name}` : `${dirPath}/${name}`;
+            searchDir(subPath, depth + 1);
           }
         });
       }
+      
+      searchDir(normalizedPath);
     }
   },
   
@@ -1540,7 +1709,11 @@ function executeShellCommand(input) {
   // Display the command
   const commandLine = document.createElement("div");
   commandLine.className = "terminal-prompt-line";
-  commandLine.innerHTML = `<span class="terminal-prompt-text">${shellCwd} $</span> <span class="terminal-command">${trimmed}</span>`;
+  const user = shellEnv.USER || "user";
+  const host = shellEnv.HOSTNAME || "battlecry";
+  const cwd = shellCwd === "/" ? "/" : shellCwd;
+  // Nerd Font:  = prompt symbol
+  commandLine.innerHTML = `<span class="terminal-prompt-text"> ${user}@${host}</span><span style="color: var(--accent-blue);">:</span><span class="terminal-prompt-text" style="color: var(--accent-purple);">${cwd}</span><span class="terminal-prompt-text"> $</span> <span class="terminal-command">${trimmed}</span>`;
   terminalHistory.appendChild(commandLine);
   
   // Parse command
@@ -1709,6 +1882,21 @@ function showTerminal() {
   terminalPanel.classList.remove("hidden");
   terminalVisible = true;
   terminalToggleBtn.classList.add("active");
+  
+  // Initialize shell environment
+  if (!shellEnv.USER) {
+    shellEnv.USER = "user";
+    shellEnv.HOSTNAME = "battlecry";
+    shellEnv.HOME = "/home/user";
+    shellEnv.PWD = shellCwd;
+    shellEnv.PATH = "/usr/local/bin:/usr/bin:/bin";
+    shellEnv.SHELL = "/bin/bash";
+  }
+  
+  // Set initial directory to home
+  if (shellCwd === "/") {
+    shellCwd = "/home/user";
+  }
   
   // Initialize shell prompt if terminal history is empty
   if (terminalHistory && terminalHistory.children.length === 0) {
@@ -1886,9 +2074,68 @@ if (terminalInput) {
       e.preventDefault();
       const command = terminalInput.value;
       terminalInput.value = "";
+      tabCompletionMatches = [];
+      tabCompletionIndex = -1;
       executeShellCommand(command);
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      const input = terminalInput.value;
+      const cursorPos = terminalInput.selectionStart;
+      const textBeforeCursor = input.substring(0, cursorPos);
+      const parts = textBeforeCursor.split(/\s+/);
+      const lastPart = parts[parts.length - 1] || "";
+      
+      // Find completions
+      const completions = findCompletions(lastPart);
+      
+      if (completions.length === 0) {
+        // No completions - beep (visual feedback)
+        terminalInput.style.borderColor = "var(--accent-red)";
+        setTimeout(() => {
+          terminalInput.style.borderColor = "";
+        }, 100);
+      } else if (completions.length === 1) {
+        // Single completion - complete it
+        const completion = completions[0];
+        const newText = textBeforeCursor.substring(0, textBeforeCursor.length - lastPart.length) + completion + input.substring(cursorPos);
+        terminalInput.value = newText;
+        terminalInput.setSelectionRange(cursorPos - lastPart.length + completion.length, cursorPos - lastPart.length + completion.length);
+      } else {
+        // Multiple completions - cycle through or show all
+        if (tabCompletionIndex === -1) {
+          // First tab - show all matches
+          tabCompletionMatches = completions;
+          writeToTerminal("", "info");
+          completions.forEach(comp => {
+            writeToTerminal(comp, "info");
+          });
+          writePrompt();
+          // Complete to common prefix
+          let commonPrefix = completions[0];
+          for (let i = 1; i < completions.length; i++) {
+            while (!completions[i].startsWith(commonPrefix)) {
+              commonPrefix = commonPrefix.slice(0, -1);
+            }
+          }
+          if (commonPrefix.length > lastPart.length) {
+            const newText = textBeforeCursor.substring(0, textBeforeCursor.length - lastPart.length) + commonPrefix + input.substring(cursorPos);
+            terminalInput.value = newText;
+            terminalInput.setSelectionRange(cursorPos - lastPart.length + commonPrefix.length, cursorPos - lastPart.length + commonPrefix.length);
+          }
+          tabCompletionIndex = 0;
+        } else {
+          // Cycle through matches
+          tabCompletionIndex = (tabCompletionIndex + 1) % tabCompletionMatches.length;
+          const completion = tabCompletionMatches[tabCompletionIndex];
+          const newText = textBeforeCursor.substring(0, textBeforeCursor.length - lastPart.length) + completion + input.substring(cursorPos);
+          terminalInput.value = newText;
+          terminalInput.setSelectionRange(cursorPos - lastPart.length + completion.length, cursorPos - lastPart.length + completion.length);
+        }
+      }
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      tabCompletionMatches = [];
+      tabCompletionIndex = -1;
       if (nodeReplMode) {
         if (nodeReplHistoryIndex > 0) {
           nodeReplHistoryIndex--;
@@ -1902,6 +2149,8 @@ if (terminalInput) {
       }
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
+      tabCompletionMatches = [];
+      tabCompletionIndex = -1;
       if (nodeReplMode) {
         if (nodeReplHistoryIndex < nodeReplHistory.length - 1) {
           nodeReplHistoryIndex++;
@@ -1920,6 +2169,8 @@ if (terminalInput) {
         }
       }
     } else if (e.key === "Escape") {
+      tabCompletionMatches = [];
+      tabCompletionIndex = -1;
       if (nodeReplMode) {
         // Exit REPL on Escape
         nodeReplMode = false;
@@ -1929,6 +2180,10 @@ if (terminalInput) {
         currentCommand = terminalInput.value;
         terminalInput.value = "";
       }
+    } else {
+      // Reset tab completion on any other key
+      tabCompletionMatches = [];
+      tabCompletionIndex = -1;
     }
   });
   
