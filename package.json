@@ -1,0 +1,25 @@
+{
+  "name": "monaco-dart-editor",
+  "version": "1.0.0",
+  "description": "Monaco Editor web application for Dart compilation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "pm2:start": "pm2 start server.js --name monaco-dart-editor",
+    "pm2:stop": "pm2 stop monaco-dart-editor",
+    "pm2:restart": "pm2 restart monaco-dart-editor",
+    "pm2:logs": "pm2 logs monaco-dart-editor",
+    "pm2:delete": "pm2 delete monaco-dart-editor"
+  },
+  "keywords": [
+    "monaco",
+    "dart",
+    "editor"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
