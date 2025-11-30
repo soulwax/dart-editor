@@ -74,6 +74,14 @@
             <span class="btn-icon">📋</span>
             Templates
           </button>
+          <button
+            id="terminalToggleBtn"
+            class="btn btn-info"
+            title="Toggle Terminal (Ctrl/Cmd + `)"
+          >
+            <span class="btn-icon">💻</span>
+            Terminal
+          </button>
           <div class="status-indicator" id="statusIndicator">
             <span class="status-dot"></span>
             <span id="statusText">Ready</span>
@@ -81,23 +89,80 @@
         </div>
       </header>
 
-      <main class="editor-container">
-        <div class="editor-pane">
-          <div class="pane-header">
-            <span class="pane-title">Dart Code</span>
-            <span class="pane-info">Editor</span>
+      <div class="main-wrapper">
+        <main class="editor-container">
+          <div class="editor-pane">
+            <div class="pane-header">
+              <span class="pane-title">Dart Code</span>
+              <span class="pane-info">Editor</span>
+            </div>
+            <div id="dartEditor" class="editor"></div>
           </div>
-          <div id="dartEditor" class="editor"></div>
-        </div>
 
-        <div class="editor-pane">
-          <div class="pane-header">
-            <span class="pane-title">Output</span>
-            <span class="pane-info" id="outputInfo">Read-only</span>
+          <div class="editor-pane">
+            <div class="pane-header">
+              <span class="pane-title">Output</span>
+              <span class="pane-info" id="outputInfo">Read-only</span>
+            </div>
+            <div id="outputEditor" class="editor"></div>
           </div>
-          <div id="outputEditor" class="editor"></div>
+        </main>
+
+        <!-- Terminal Panel (VS Code style) -->
+        <div id="terminalPanel" class="terminal-panel hidden">
+          <div class="terminal-header">
+            <div class="terminal-tabs">
+              <button class="terminal-tab active" data-terminal="output">
+                <span class="terminal-tab-icon">📟</span>
+                OUTPUT
+              </button>
+              <button class="terminal-tab" data-terminal="console">
+                <span class="terminal-tab-icon">🖥️</span>
+                CONSOLE
+              </button>
+              <button class="terminal-tab" data-terminal="problems">
+                <span class="terminal-tab-icon">⚠️</span>
+                PROBLEMS
+              </button>
+            </div>
+            <div class="terminal-actions">
+              <button id="terminalClearBtn" class="terminal-action-btn" title="Clear Terminal">
+                🗑️
+              </button>
+              <button id="terminalCloseBtn" class="terminal-action-btn" title="Close Terminal">
+                ✕
+              </button>
+            </div>
+          </div>
+          <div class="terminal-content">
+            <div id="terminalOutput" class="terminal-output active">
+              <div id="terminalHistory" class="terminal-history"></div>
+              <div class="terminal-input-line">
+                <span class="terminal-prompt">$</span>
+                <input type="text" id="terminalInput" class="terminal-input" autocomplete="off" spellcheck="false" />
+              </div>
+            </div>
+            <div id="terminalConsole" class="terminal-console"></div>
+            <div id="terminalProblems" class="terminal-problems"></div>
+          </div>
         </div>
-      </main>
+      </div>
+
+      <!-- Command Palette (VS Code style) -->
+      <div id="commandPalette" class="command-palette hidden">
+        <div class="command-palette-header">
+          <span>Command Palette</span>
+          <button id="commandPaletteClose" class="command-palette-close">✕</button>
+        </div>
+        <input
+          type="text"
+          id="commandPaletteInput"
+          class="command-palette-input"
+          placeholder="Type a command name..."
+          autocomplete="off"
+        />
+        <div id="commandPaletteList" class="command-palette-list"></div>
+      </div>
 
       <div id="notification" class="notification hidden">
         <div class="notification-content">

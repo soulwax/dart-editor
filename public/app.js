@@ -842,6 +842,25 @@ require(["vs/editor/editor.main"], function () {
     autoSave(); // Auto-save on changes
   });
 
+  // Update problems panel when markers change
+  monaco.editor.onDidChangeMarkers((uris) => {
+    const model = dartEditor.getModel();
+    if (uris.includes(model.uri)) {
+      const markers = monaco.editor.getModelMarkers({ resource: model.uri });
+      problems = markers.map((marker) => ({
+        severity: marker.severity === monaco.MarkerSeverity.Error ? "error" : 
+                  marker.severity === monaco.MarkerSeverity.Warning ? "warning" : "info",
+        message: marker.message,
+        line: marker.startLineNumber,
+        column: marker.startColumn,
+      }));
+      
+      if (terminalTab === "problems") {
+        updateProblemsPanel();
+      }
+    }
+  });
+
   // Load auto-saved code on startup
   loadAutoSave();
 
@@ -879,6 +898,17 @@ const runBtn = document.getElementById("runBtn");
 const saveBtn = document.getElementById("saveBtn");
 const loadBtn = document.getElementById("loadBtn");
 const templatesBtn = document.getElementById("templatesBtn");
+const terminalToggleBtn = document.getElementById("terminalToggleBtn");
+const terminalPanel = document.getElementById("terminalPanel");
+const terminalOutput = document.getElementById("terminalOutput");
+const terminalConsole = document.getElementById("terminalConsole");
+const terminalProblems = document.getElementById("terminalProblems");
+const terminalClearBtn = document.getElementById("terminalClearBtn");
+const terminalCloseBtn = document.getElementById("terminalCloseBtn");
+const commandPalette = document.getElementById("commandPalette");
+const commandPaletteInput = document.getElementById("commandPaletteInput");
+const commandPaletteList = document.getElementById("commandPaletteList");
+const commandPaletteClose = document.getElementById("commandPaletteClose");
 const statusIndicator = document.getElementById("statusIndicator");
 const statusText = document.getElementById("statusText");
 const notification = document.getElementById("notification");
@@ -886,6 +916,11 @@ const notificationIcon = document.getElementById("notificationIcon");
 const notificationMessage = document.getElementById("notificationMessage");
 const notificationClose = document.getElementById("notificationClose");
 const outputInfo = document.getElementById("outputInfo");
+
+// Terminal state
+let terminalVisible = false;
+let terminalTab = "output";
+let problems = [];
 
 // Code Templates
 const CODE_TEMPLATES = {
@@ -899,36 +934,36 @@ const CODE_TEMPLATES = {
   double height = 1.75;
   bool isActive = true;
   
-  print('Name: \$name');
-  print('Age: \$age');
-  print('Height: \$height');
-  print('Active: \$isActive');
+  print('Name: ' + name);
+  print('Age: ' + age.toString());
+  print('Height: ' + height.toString());
+  print('Active: ' + isActive.toString());
 }`,
   "Lists & Collections": `void main() {
   // List
   List<int> numbers = [1, 2, 3, 4, 5];
   numbers.add(6);
-  print('Numbers: \$numbers');
+  print('Numbers: ' + numbers.toString());
   
   // Map
   Map<String, int> ages = {
     'Alice': 30,
     'Bob': 25,
   };
-  print('Ages: \$ages');
+  print('Ages: ' + ages.toString());
   
   // Set
   Set<String> names = {'Alice', 'Bob', 'Charlie'};
-  print('Names: \$names');
+  print('Names: ' + names.toString());
 }`,
   "Functions": `void main() {
   greet('Alice');
   int result = add(5, 3);
-  print('Result: \$result');
+  print('Result: ' + result.toString());
 }
 
 void greet(String name) {
-  print('Hello, \$name!');
+  print('Hello, ' + name + '!');
 }
 
 int add(int a, int b) {
@@ -946,7 +981,7 @@ class Person {
   Person(this.name, this.age);
   
   void introduce() {
-    print('Hi, I'm \$name and I'm \$age years old.');
+    print('Hi, I am ' + name + ' and I am ' + age.toString() + ' years old.');
   }
 }`,
   "Async/Await": `void main() async {
@@ -956,15 +991,17 @@ class Person {
 }
 
 Future<void> fetchData() async {
-  await Future.delayed(Duration(seconds: 2));
+  // Note: Future.delayed requires dart:async
+  // For compilation, use a simple delay simulation
+  await Future.value(null);
   print('Data fetched!');
 }`,
   "Error Handling": `void main() {
   try {
     int result = divide(10, 0);
-    print('Result: \$result');
+    print('Result: ' + result.toString());
   } catch (e) {
-    print('Error: \$e');
+    print('Error: ' + e.toString());
   }
 }
 
@@ -974,20 +1011,323 @@ int divide(int a, int b) {
   }
   return a ~/ b;
 }`,
-  "Streams": `void main() async {
-  var stream = countStream(5);
-  await for (var value in stream) {
-    print('Received: \$value');
-  }
-}
-
-Stream<int> countStream(int max) async* {
-  for (int i = 1; i <= max; i++) {
-    await Future.delayed(Duration(seconds: 1));
-    yield i;
+  "Streams": `// Note: Streams require dart:async and may not compile to JS directly
+// This is a simplified example using a List
+void main() {
+  var numbers = [1, 2, 3, 4, 5];
+  for (var value in numbers) {
+    print('Received: ' + value.toString());
   }
 }`,
 };
+
+// Terminal Functions
+function writeToTerminal(message, type = "info") {
+  if (!terminalVisible) {
+    showTerminal();
+  }
+  
+  const timestamp = new Date().toLocaleTimeString();
+  const line = document.createElement("div");
+  line.className = `terminal-line ${type}`;
+  
+  const timestampSpan = document.createElement("span");
+  timestampSpan.className = "timestamp";
+  timestampSpan.textContent = `[${timestamp}] `;
+  
+  const messageSpan = document.createElement("span");
+  messageSpan.textContent = message;
+  
+  line.appendChild(timestampSpan);
+  line.appendChild(messageSpan);
+  terminalOutput.appendChild(line);
+  
+  // Auto-scroll to bottom
+  terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+
+function writeToConsole(message, type = "info") {
+  if (!terminalVisible) {
+    showTerminal();
+  }
+  
+  const timestamp = new Date().toLocaleTimeString();
+  const line = document.createElement("div");
+  line.className = `terminal-line ${type}`;
+  
+  const timestampSpan = document.createElement("span");
+  timestampSpan.className = "timestamp";
+  timestampSpan.textContent = `[${timestamp}] `;
+  
+  const messageSpan = document.createElement("span");
+  messageSpan.textContent = message;
+  
+  line.appendChild(timestampSpan);
+  line.appendChild(messageSpan);
+  terminalConsole.appendChild(line);
+  
+  // Auto-scroll to bottom
+  terminalConsole.scrollTop = terminalConsole.scrollHeight;
+}
+
+// Console message interception - set up after writeToConsole is defined
+(function setupConsoleInterception() {
+  // Store original console methods
+  const originalConsole = {
+    log: console.log.bind(console),
+    error: console.error.bind(console),
+    warn: console.warn.bind(console),
+    info: console.info.bind(console),
+    debug: console.debug.bind(console),
+    trace: console.trace.bind(console),
+    table: console.table.bind(console),
+    group: console.group.bind(console),
+    groupEnd: console.groupEnd.bind(console),
+    groupCollapsed: console.groupCollapsed.bind(console),
+    time: console.time.bind(console),
+    timeEnd: console.timeEnd.bind(console),
+    assert: console.assert.bind(console),
+    clear: console.clear.bind(console),
+  };
+
+  // Helper function to format console arguments
+  function formatConsoleArgs(args) {
+    return args.map(arg => {
+      if (arg === null) return "null";
+      if (arg === undefined) return "undefined";
+      if (typeof arg === "object") {
+        try {
+          return JSON.stringify(arg, null, 2);
+        } catch (e) {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    }).join(" ");
+  }
+
+  // Override console methods
+  console.log = function(...args) {
+    originalConsole.log(...args);
+    if (terminalConsole) {
+      writeToConsole(formatConsoleArgs(args), "info");
+    }
+  };
+
+  console.error = function(...args) {
+    originalConsole.error(...args);
+    if (terminalConsole) {
+      writeToConsole(formatConsoleArgs(args), "error");
+    }
+  };
+
+  console.warn = function(...args) {
+    originalConsole.warn(...args);
+    if (terminalConsole) {
+      writeToConsole(formatConsoleArgs(args), "warning");
+    }
+  };
+
+  console.info = function(...args) {
+    originalConsole.info(...args);
+    if (terminalConsole) {
+      writeToConsole(formatConsoleArgs(args), "info");
+    }
+  };
+
+  console.debug = function(...args) {
+    originalConsole.debug(...args);
+    if (terminalConsole) {
+      writeToConsole(`[DEBUG] ${formatConsoleArgs(args)}`, "info");
+    }
+  };
+
+  console.trace = function(...args) {
+    originalConsole.trace(...args);
+    if (terminalConsole) {
+      const stack = new Error().stack;
+      writeToConsole(`[TRACE] ${formatConsoleArgs(args)}\n${stack}`, "info");
+    }
+  };
+
+  // Handle uncaught errors
+  window.addEventListener("error", (event) => {
+    if (terminalConsole) {
+      const errorMsg = `${event.error?.name || "Error"}: ${event.message}`;
+      const location = event.filename ? ` at ${event.filename}:${event.lineno}:${event.colno}` : "";
+      writeToConsole(`${errorMsg}${location}`, "error");
+      if (event.error?.stack) {
+        writeToConsole(event.error.stack, "error");
+      }
+    }
+  });
+
+  // Handle unhandled promise rejections
+  window.addEventListener("unhandledrejection", (event) => {
+    if (terminalConsole) {
+      const errorMsg = event.reason?.message || String(event.reason || "Unhandled Promise Rejection");
+      writeToConsole(`Unhandled Promise Rejection: ${errorMsg}`, "error");
+      if (event.reason?.stack) {
+        writeToConsole(event.reason.stack, "error");
+      }
+    }
+  });
+})();
+
+function clearTerminal() {
+  if (terminalTab === "output") {
+    terminalOutput.innerHTML = "";
+    writeToTerminal("Terminal cleared", "info");
+  } else if (terminalTab === "console") {
+    terminalConsole.innerHTML = "";
+    writeToConsole("Console cleared", "info");
+  } else if (terminalTab === "problems") {
+    terminalProblems.innerHTML = "";
+    problems = [];
+    updateProblemsPanel();
+  }
+}
+
+function showTerminal() {
+  terminalPanel.classList.remove("hidden");
+  terminalVisible = true;
+  terminalToggleBtn.classList.add("active");
+}
+
+function hideTerminal() {
+  terminalPanel.classList.add("hidden");
+  terminalVisible = false;
+  terminalToggleBtn.classList.remove("active");
+}
+
+function toggleTerminal() {
+  if (terminalVisible) {
+    hideTerminal();
+  } else {
+    showTerminal();
+  }
+}
+
+function switchTerminalTab(tabName) {
+  terminalTab = tabName;
+  
+  // Update tab buttons
+  document.querySelectorAll(".terminal-tab").forEach((tab) => {
+    tab.classList.remove("active");
+    if (tab.dataset.terminal === tabName) {
+      tab.classList.add("active");
+    }
+  });
+  
+  // Update content
+  terminalOutput.classList.toggle("active", tabName === "output");
+  terminalConsole.classList.toggle("active", tabName === "console");
+  terminalProblems.classList.toggle("active", tabName === "problems");
+  
+  if (tabName === "problems") {
+    updateProblemsPanel();
+  }
+}
+
+function updateProblemsPanel() {
+  terminalProblems.innerHTML = "";
+  
+  if (problems.length === 0) {
+    terminalProblems.innerHTML = '<div style="padding: 16px; color: var(--text-secondary); text-align: center;">No problems found</div>';
+    return;
+  }
+  
+  problems.forEach((problem) => {
+    const item = document.createElement("div");
+    item.className = `problem-item ${problem.severity}`;
+    
+    item.innerHTML = `
+      <div>
+        <span class="problem-severity ${problem.severity}">${problem.severity}</span>
+        <span class="problem-message">${problem.message}</span>
+      </div>
+      <div class="problem-location">Line ${problem.line}:${problem.column}</div>
+    `;
+    
+    item.addEventListener("click", () => {
+      if (dartEditor) {
+        dartEditor.setPosition({ lineNumber: problem.line, column: problem.column });
+        dartEditor.focus();
+      }
+    });
+    
+    terminalProblems.appendChild(item);
+  });
+}
+
+// Command Palette Functions
+const COMMANDS = [
+  { id: "compile.js", label: "Compile to JavaScript", icon: "⚡", shortcut: "Ctrl+Enter", action: () => compile("js") },
+  { id: "compile.native", label: "Compile to Native", icon: "🔧", shortcut: "Ctrl+Shift+Enter", action: () => compile("native") },
+  { id: "run", label: "Run JavaScript", icon: "▶️", shortcut: "Ctrl+R", action: runCode },
+  { id: "save", label: "Save Code", icon: "💾", shortcut: "Ctrl+S", action: saveCode },
+  { id: "load", label: "Load Code", icon: "📂", shortcut: "", action: loadCode },
+  { id: "templates", label: "Show Templates", icon: "📋", shortcut: "", action: showTemplates },
+  { id: "format", label: "Format Document", icon: "✨", shortcut: "Ctrl+Shift+F", action: () => dartEditor?.getAction("editor.action.formatDocument").run() },
+  { id: "terminal.toggle", label: "Toggle Terminal", icon: "💻", shortcut: "Ctrl+`", action: toggleTerminal },
+  { id: "terminal.clear", label: "Clear Terminal", icon: "🗑️", shortcut: "", action: clearTerminal },
+  { id: "output.clear", label: "Clear Output", icon: "🗑️", shortcut: "Ctrl+K", action: clearOutput },
+];
+
+let filteredCommands = [...COMMANDS];
+let selectedCommandIndex = 0;
+
+function showCommandPalette() {
+  commandPalette.classList.remove("hidden");
+  commandPaletteInput.value = "";
+  commandPaletteInput.focus();
+  filterCommands("");
+}
+
+function hideCommandPalette() {
+  commandPalette.classList.add("hidden");
+  selectedCommandIndex = 0;
+}
+
+function filterCommands(query) {
+  const lowerQuery = query.toLowerCase();
+  filteredCommands = COMMANDS.filter((cmd) =>
+    cmd.label.toLowerCase().includes(lowerQuery)
+  );
+  selectedCommandIndex = 0;
+  renderCommands();
+}
+
+function renderCommands() {
+  commandPaletteList.innerHTML = "";
+  
+  filteredCommands.forEach((cmd, index) => {
+    const item = document.createElement("div");
+    item.className = `command-item ${index === selectedCommandIndex ? "selected" : ""}`;
+    
+    item.innerHTML = `
+      <span class="command-item-icon">${cmd.icon}</span>
+      <span class="command-item-label">${cmd.label}</span>
+      ${cmd.shortcut ? `<span class="command-item-shortcut">${cmd.shortcut}</span>` : ""}
+    `;
+    
+    item.addEventListener("click", () => executeCommand(cmd));
+    commandPaletteList.appendChild(item);
+  });
+  
+  // Scroll selected item into view
+  const selectedItem = commandPaletteList.querySelector(".selected");
+  if (selectedItem) {
+    selectedItem.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function executeCommand(cmd) {
+  hideCommandPalette();
+  if (cmd.action) {
+    cmd.action();
+  }
+}
 
 // Event Listeners
 compileJsBtn.addEventListener("click", () => compile("js"));
@@ -997,7 +1337,55 @@ runBtn.addEventListener("click", runCode);
 saveBtn.addEventListener("click", saveCode);
 loadBtn.addEventListener("click", loadCode);
 templatesBtn.addEventListener("click", showTemplates);
+terminalToggleBtn.addEventListener("click", toggleTerminal);
+terminalClearBtn.addEventListener("click", clearTerminal);
+terminalCloseBtn.addEventListener("click", hideTerminal);
 notificationClose.addEventListener("click", hideNotification);
+
+// Terminal tab switching
+document.querySelectorAll(".terminal-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    switchTerminalTab(tab.dataset.terminal);
+  });
+});
+
+// Command Palette event listeners
+commandPaletteInput.addEventListener("input", (e) => {
+  filterCommands(e.target.value);
+});
+
+commandPaletteInput.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    e.stopPropagation();
+    selectedCommandIndex = Math.min(selectedCommandIndex + 1, filteredCommands.length - 1);
+    renderCommands();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    e.stopPropagation();
+    selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
+    renderCommands();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    e.stopPropagation();
+    if (filteredCommands[selectedCommandIndex]) {
+      executeCommand(filteredCommands[selectedCommandIndex]);
+    }
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    hideCommandPalette();
+  }
+});
+
+// Prevent command palette shortcuts from triggering when palette is open
+commandPalette.addEventListener("keydown", (e) => {
+  if (e.key === "p" && e.ctrlKey || e.key === "p" && e.metaKey) {
+    e.stopPropagation();
+  }
+});
+
+commandPaletteClose.addEventListener("click", hideCommandPalette);
 
 // Auto-hide notification after 5 seconds
 let notificationTimeout = null;
@@ -1048,6 +1436,7 @@ async function compile(target) {
 
   isCompiling = true;
   updateStatus(`Compiling to ${target.toUpperCase()}...`, "compiling");
+  writeToTerminal(`Compiling Dart code to ${target.toUpperCase()}...`, "info");
 
   const targetBtn = target === "js" ? compileJsBtn : compileNativeBtn;
   targetBtn.classList.add("loading");
@@ -1067,10 +1456,7 @@ async function compile(target) {
     const data = await response.json();
 
     if (data.success) {
-      // Set output
-      outputEditor.setValue(data.output);
-
-      // Update language mode based on target
+      // Update language mode based on target FIRST
       const model = outputEditor.getModel();
       if (target === "js") {
         monaco.editor.setModelLanguage(model, "javascript");
@@ -1079,8 +1465,15 @@ async function compile(target) {
         monaco.editor.setModelLanguage(model, "plaintext");
         outputInfo.textContent = "Native Output Info";
       }
+      
+      // Set output AFTER language is set
+      outputEditor.setValue(data.output);
 
       updateStatus("Compilation successful", "ready");
+      writeToTerminal(`✓ Compilation successful! Output size: ${data.output.length} characters`, "success");
+      if (data.stdout) {
+        writeToTerminal(data.stdout, "info");
+      }
       showNotification(
         "success",
         "✅",
@@ -1100,6 +1493,13 @@ async function compile(target) {
       outputInfo.textContent = "Error Output";
 
       updateStatus("Compilation failed", "error");
+      writeToTerminal(`✗ Compilation failed`, "error");
+      if (data.error) {
+        writeToTerminal(data.error, "error");
+      }
+      if (data.stdout) {
+        writeToTerminal(data.stdout, "info");
+      }
       showNotification(
         "error",
         "❌",
@@ -1182,7 +1582,7 @@ function hideNotification() {
 function runCode() {
   const outputValue = outputEditor.getValue();
   
-  if (!outputValue || outputValue.trim().startsWith("//")) {
+  if (!outputValue || outputValue.trim().length === 0) {
     showNotification(
       "warning",
       "⚠️",
@@ -1191,13 +1591,33 @@ function runCode() {
     return;
   }
 
-  // Check if output is JavaScript
-  const model = outputEditor.getModel();
-  if (monaco.editor.getModelLanguage(model) !== "javascript") {
+  // Check if output looks like JavaScript (not just comments or error messages)
+  const trimmedValue = outputValue.trim();
+  if (trimmedValue.startsWith("//") && !trimmedValue.includes("function") && !trimmedValue.includes("=>")) {
     showNotification(
       "warning",
       "⚠️",
-      "Output must be JavaScript. Please compile to JS first."
+      "Output appears to be comments only. Please compile to JavaScript first."
+    );
+    return;
+  }
+
+  // Check if output is JavaScript by language mode OR by content
+  const model = outputEditor.getModel();
+  const isJavaScript = model.getLanguageId() === "javascript" ||
+                       trimmedValue.includes("function") ||
+                       trimmedValue.includes("=>") ||
+                       trimmedValue.includes("var ") ||
+                       trimmedValue.includes("let ") ||
+                       trimmedValue.includes("const ") ||
+                       trimmedValue.includes("class ") ||
+                       trimmedValue.match(/^\s*(function|var|let|const|class|export|import)/m);
+
+  if (!isJavaScript) {
+    showNotification(
+      "warning",
+      "⚠️",
+      "Output doesn't appear to be JavaScript. Please compile to JS first (Ctrl/Cmd + Enter)."
     );
     return;
   }
@@ -1232,16 +1652,25 @@ function runCode() {
     console.warn = originalWarn;
 
     // Show results
+    writeToTerminal("▶ Executing JavaScript code...", "info");
     if (consoleOutput.length > 0) {
       const result = "// Execution Output:\n" + consoleOutput.join("\n");
       outputEditor.setValue(result);
+      consoleOutput.forEach((line) => writeToTerminal(line, "info"));
+      writeToTerminal("✓ Execution completed successfully", "success");
       showNotification("success", "✅", "Code executed successfully!");
     } else {
+      writeToTerminal("✓ Execution completed (no console output)", "info");
       showNotification("info", "ℹ️", "Code executed (no console output)");
     }
   } catch (error) {
     const errorMsg = `// Execution Error:\n\n${error.name}: ${error.message}\n\n${error.stack || ""}`;
     outputEditor.setValue(errorMsg);
+    writeToTerminal(`✗ Execution error: ${error.name}`, "error");
+    writeToTerminal(error.message, "error");
+    if (error.stack) {
+      writeToTerminal(error.stack, "error");
+    }
     showNotification("error", "❌", "Execution failed: " + error.message);
     console.error("Execution error:", error);
   }
@@ -1380,9 +1809,27 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     runCode();
   }
+
+  // Ctrl/Cmd + `: Toggle Terminal
+  if ((e.ctrlKey || e.metaKey) && e.key === "`") {
+    e.preventDefault();
+    toggleTerminal();
+  }
+
+  // Ctrl/Cmd + Shift + P: Command Palette
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "p") {
+    e.preventDefault();
+    showCommandPalette();
+  }
 });
 
-console.log("Soul's Dart Editor initialized");
+  console.log("Soul's Dart Editor initialized");
+  
+  // Initialize terminal with welcome message (after a short delay to ensure DOM is ready)
+  setTimeout(() => {
+    writeToTerminal("Dart Editor Terminal - Ready", "success");
+    writeToTerminal("Type commands or compile code to see output here", "info");
+  }, 100);
 console.log("Keyboard shortcuts:");
 console.log("  Ctrl/Cmd + Enter: Compile to JS");
 console.log("  Ctrl/Cmd + Shift + Enter: Compile to Native");
@@ -1390,6 +1837,8 @@ console.log("  Ctrl/Cmd + R: Run compiled JavaScript");
 console.log("  Ctrl/Cmd + S: Save code");
 console.log("  Ctrl/Cmd + K: Clear output");
 console.log("  Ctrl/Cmd + Shift + F: Format code");
+console.log("  Ctrl/Cmd + `: Toggle Terminal");
+console.log("  Ctrl/Cmd + Shift + P: Command Palette");
 console.log("  Ctrl/Cmd + F: Find");
 console.log("  Ctrl/Cmd + H: Replace");
 console.log("  Ctrl/Cmd + /: Toggle comment");
@@ -1406,3 +1855,6 @@ console.log("  • Auto-save to localStorage");
 console.log("  • Code templates & examples");
 console.log("  • Go to Definition / Find References");
 console.log("  • Rename Symbol across code");
+console.log("  • Integrated Terminal (VS Code style)");
+console.log("  • Command Palette (VS Code style)");
+console.log("  • Problems Panel with diagnostics");
