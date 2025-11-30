@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<!-- File: public/index.html -->
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Battlecry Dart Editor</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      rel="stylesheet"
+      data-name="vs/editor/editor.main"
+      href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <h1>Battlecry Dart Editor</h1>
+        <div class="toolbar">
+          <button
+            id="compileJsBtn"
+            class="btn btn-primary"
+            title="Compile Dart to JavaScript"
+          >
+            <span class="btn-icon">⚡</span>
+            Compile to JS
+          </button>
+          <button
+            id="compileNativeBtn"
+            class="btn btn-secondary"
+            title="Compile Dart to Native Executable"
+          >
+            <span class="btn-icon">🔧</span>
+            Compile to Native
+          </button>
+          <button
+            id="clearBtn"
+            class="btn btn-danger"
+            title="Clear output pane"
+          >
+            <span class="btn-icon">🗑️</span>
+            Clear Output
+          </button>
+          <div class="status-indicator" id="statusIndicator">
+            <span class="status-dot"></span>
+            <span id="statusText">Ready</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="editor-container">
+        <div class="editor-pane">
+          <div class="pane-header">
+            <span class="pane-title">Dart Code</span>
+            <span class="pane-info">Editor</span>
+          </div>
+          <div id="dartEditor" class="editor"></div>
+        </div>
+
+        <div class="editor-pane">
+          <div class="pane-header">
+            <span class="pane-title">Output</span>
+            <span class="pane-info" id="outputInfo">Read-only</span>
+          </div>
+          <div id="outputEditor" class="editor"></div>
+        </div>
+      </main>
+
+      <div id="notification" class="notification hidden">
+        <div class="notification-content">
+          <span class="notification-icon" id="notificationIcon">ℹ️</span>
+          <span class="notification-message" id="notificationMessage"></span>
+          <button class="notification-close" id="notificationClose">
+            &times;
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script>
+      require.config({
+        paths: {
+          vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs",
+        },
+      });
+    </script>
+    <script src="app.js"></script>
+  </body>
+</html>

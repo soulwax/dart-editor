@@ -1,0 +1,14 @@
+Monaco-Editor
+├───.gitignore
+├───LICENSE
+├───package-lock.json
+├───package.json
+├───README.md
+├───server.js
+├───.claude/
+│   └───settings.local.json
+├───public/
+│   ├───app.js
+│   ├───index.html
+│   └───style.css
+└───temp/
