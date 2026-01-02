@@ -1,6 +1,7 @@
 // Serverless-compatible version for Vercel deployment
-require("dotenv").config();
+// Express must be imported at the top level for Vercel to detect this as a serverless function
 const express = require("express");
+require("dotenv").config();
 const { exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -422,4 +423,5 @@ app.get("/health", (req, res) => {
 cleanupTempFiles();
 
 // Export for Vercel serverless
+// Vercel expects the handler to be the default export
 module.exports = app;
