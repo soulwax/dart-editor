@@ -3,49 +3,15 @@
   "buildCommand": "npm install",
   "framework": null,
   "installCommand": "npm install",
-  "outputDirectory": "public",
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
-    },
     {
       "source": "/(.*)",
       "destination": "/api/server"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/monaco/(.*)",
-      "dest": "/monaco/$1"
-    },
-    {
-      "src": "/(.*\\.(css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|json))",
-      "dest": "/$1"
-    },
-    {
-      "src": "/compile",
-      "dest": "/api/server"
-    },
-    {
-      "src": "/health",
-      "dest": "/api/server"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/server"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/api/server"
     }
   ],
   "functions": {
     "api/server.js": {
       "maxDuration": 60
     }
-  },
-  "env": {
-    "NODE_ENV": "production"
   }
 }
