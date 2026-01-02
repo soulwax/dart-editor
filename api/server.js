@@ -1,30 +1,27 @@
-// File: server.js
-
+// Serverless-compatible version for Vercel deployment
 require("dotenv").config();
 const express = require("express");
 const { exec } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { db, files, directories } = require("./db/index");
+const { db, files } = require("../db/index");
 const { eq, and } = require("drizzle-orm");
 
 const app = express();
-const PORT = process.env.PORT || 5555;
-const TEMP_DIR = path.join(__dirname, "temp");
 
 // Middleware
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static("public"));
 app.use("/monaco", express.static("monaco"));
 
+// Use /tmp for temporary files in serverless environment
+const TEMP_DIR = process.env.VERCEL ? "/tmp/dart-editor" : path.join(__dirname, "..", "temp");
+
 // Ensure temp directory exists
 if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
-
-// Clean up old temp files on startup
-cleanupTempFiles();
 
 // Check if Dart SDK is available
 function checkDartSDK(callback) {
@@ -48,19 +45,18 @@ function cleanupTempFiles() {
 
   files.forEach((file) => {
     const filePath = path.join(TEMP_DIR, file);
-    const stats = fs.statSync(filePath);
-
-    if (stats.mtimeMs < oneHourAgo) {
-      try {
+    try {
+      const stats = fs.statSync(filePath);
+      if (stats.mtimeMs < oneHourAgo) {
         if (stats.isDirectory()) {
           fs.rmSync(filePath, { recursive: true, force: true });
         } else {
           fs.unlinkSync(filePath);
         }
         console.log(`Cleaned up old temp file: ${file}`);
-      } catch (err) {
-        console.error(`Error cleaning up ${file}:`, err.message);
       }
+    } catch (err) {
+      console.error(`Error cleaning up ${file}:`, err.message);
     }
   });
 }
@@ -228,11 +224,11 @@ app.get("/api/files/*", async (req, res) => {
   try {
     const filePath = "/" + req.params[0];
     const result = await db.select().from(files).where(eq(files.path, filePath)).limit(1);
-    
+
     if (result.length === 0) {
       return res.status(404).json({ error: "File not found" });
     }
-    
+
     res.json({
       success: true,
       file: result[0],
@@ -247,21 +243,21 @@ app.get("/api/files/*", async (req, res) => {
 app.post("/api/files", async (req, res) => {
   try {
     const { path: filePath, content = "", type = "file", permissions } = req.body;
-    
+
     if (!filePath) {
       return res.status(400).json({ error: "Path is required" });
     }
-    
+
     // Check if file already exists
     const existing = await db.select().from(files).where(eq(files.path, filePath)).limit(1);
-    
+
     if (existing.length > 0) {
       return res.status(409).json({ error: "File already exists" });
     }
-    
+
     const defaultPerms = type === "directory" ? "drwxr-xr-x" : "-rw-r--r--";
     const filePermissions = permissions || defaultPerms;
-    
+
     const result = await db.insert(files).values({
       path: filePath,
       content: content,
@@ -269,7 +265,7 @@ app.post("/api/files", async (req, res) => {
       permissions: filePermissions,
       size: content.length,
     }).returning();
-    
+
     res.json({
       success: true,
       file: result[0],
@@ -285,31 +281,31 @@ app.put("/api/files/*", async (req, res) => {
   try {
     const filePath = "/" + req.params[0];
     const { content, permissions } = req.body;
-    
+
     const existing = await db.select().from(files).where(eq(files.path, filePath)).limit(1);
-    
+
     if (existing.length === 0) {
       return res.status(404).json({ error: "File not found" });
     }
-    
+
     const updateData = {
       updatedAt: new Date(),
     };
-    
+
     if (content !== undefined) {
       updateData.content = content;
       updateData.size = content.length;
     }
-    
+
     if (permissions !== undefined) {
       updateData.permissions = permissions;
     }
-    
+
     const result = await db.update(files)
       .set(updateData)
       .where(eq(files.path, filePath))
       .returning();
-    
+
     res.json({
       success: true,
       file: result[0],
@@ -324,15 +320,15 @@ app.put("/api/files/*", async (req, res) => {
 app.delete("/api/files/*", async (req, res) => {
   try {
     const filePath = "/" + req.params[0];
-    
+
     const result = await db.delete(files)
       .where(eq(files.path, filePath))
       .returning();
-    
+
     if (result.length === 0) {
       return res.status(404).json({ error: "File not found" });
     }
-    
+
     res.json({
       success: true,
       message: "File deleted",
@@ -347,23 +343,21 @@ app.delete("/api/files/*", async (req, res) => {
 app.get("/api/files", async (req, res) => {
   try {
     const dirPath = req.query.path || "/";
-    
+
     // Get all files that start with the directory path
     const allFiles = await db.select().from(files);
     const dirFiles = allFiles.filter(file => {
-      if (file.path === dirPath) return false; // Don't include the directory itself
+      if (file.path === dirPath) return false;
       if (dirPath === "/") {
-        // Root directory - files should be directly under root
         const parts = file.path.split("/").filter(p => p);
         return parts.length === 1;
       }
-      // Files should start with dirPath and be direct children
       if (!file.path.startsWith(dirPath + "/")) return false;
       const relativePath = file.path.substring(dirPath.length + 1);
       const parts = relativePath.split("/").filter(p => p);
-      return parts.length === 1; // Direct child only
+      return parts.length === 1;
     });
-    
+
     res.json({
       success: true,
       files: dirFiles,
@@ -378,20 +372,20 @@ app.get("/api/files", async (req, res) => {
 app.post("/api/directories", async (req, res) => {
   try {
     const { path: dirPath } = req.body;
-    
+
     if (!dirPath) {
       return res.status(400).json({ error: "Path is required" });
     }
-    
+
     // Check if directory already exists
     const existing = await db.select().from(files)
       .where(and(eq(files.path, dirPath), eq(files.type, "directory")))
       .limit(1);
-    
+
     if (existing.length > 0) {
       return res.status(409).json({ error: "Directory already exists" });
     }
-    
+
     const result = await db.insert(files).values({
       path: dirPath,
       content: "",
@@ -399,7 +393,7 @@ app.post("/api/directories", async (req, res) => {
       permissions: "drwxr-xr-x",
       size: 4096,
     }).returning();
-    
+
     res.json({
       success: true,
       directory: result[0],
@@ -416,55 +410,20 @@ app.get("/health", (req, res) => {
     res.json({
       status: "ok",
       dartSDK: available,
+      isVercel: !!process.env.VERCEL,
+      environment: process.env.NODE_ENV || 'development',
       message: available ? "Dart SDK available" : "Dart SDK not found in PATH",
     });
   });
 });
 
-// Initialize database connection
-async function initializeDatabase() {
-  try {
-    // Test database connection
-    await db.select().from(files).limit(1);
-    console.log("✅ Database connected successfully");
-  } catch (error) {
-    console.error("❌ Database connection error:", error.message);
-    console.error("   Make sure PostgreSQL is running and DATABASE_URL is correct in .env");
-  }
-}
-
-// Start server
-app.listen(PORT, async () => {
-  console.log(`\n🚀 Soul's Dart Editor Server Running`);
-  console.log(`📡 Server: http://localhost:${PORT}`);
-  console.log(`⏰ Started at: ${new Date().toLocaleString()}\n`);
-
-  // Initialize database
-  await initializeDatabase();
-
-  checkDartSDK((available) => {
-    if (!available) {
-      console.warn(
-        "⚠️  WARNING: Dart SDK not detected. Compilation will fail."
-      );
-      console.warn("   Install Dart SDK: https://dart.dev/get-dart\n");
-    }
-  });
-
-  // Schedule periodic cleanup every hour
-  setInterval(cleanupTempFiles, 60 * 60 * 1000);
+// Root endpoint - serve index.html
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
-// Graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("\n🛑 Shutting down server...");
-  cleanupTempFiles();
-  try {
-    const { client } = require("./db/index");
-    await client.end();
-    console.log("✅ Database connection closed");
-  } catch (error) {
-    console.error("Error closing database:", error);
-  }
-  process.exit(0);
-});
+// Cleanup on startup for serverless (only clean files older than 1 hour)
+cleanupTempFiles();
+
+// Export for Vercel serverless
+module.exports = app;

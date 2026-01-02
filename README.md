@@ -272,6 +272,24 @@ npm run dev
 
 The server logs compilation requests and errors to the console. Check the terminal output for debugging information.
 
+## Deployment
+
+### Deploying to Vercel
+
+This project is configured for easy deployment to Vercel:
+
+1. **Quick Deploy**: Push to GitHub and import to Vercel
+2. **Environment Variables**: Set `DATABASE_URL` in Vercel dashboard
+3. **Database**: Use Neon PostgreSQL (serverless, free tier available)
+
+For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+For Neon database migration, see [NEON_MIGRATION.md](NEON_MIGRATION.md).
+
+### Important Note
+
+Vercel's serverless environment does not include the Dart SDK by default. The compilation features will not work without additional configuration. See [DEPLOYMENT.md](DEPLOYMENT.md) for alternative platforms or solutions.
+
 ## License
 
 This project is licensed under the GPLv3 License. See the [LICENSE](LICENSE) file for details.
@@ -285,3 +303,5 @@ Feel free to submit issues and enhancement requests!
 - [Monaco Editor](https://microsoft.github.io/monaco-editor/) - Microsoft's code editor
 - [Express.js](https://expressjs.com/) - Web framework
 - [Dart](https://dart.dev/) - Programming language
+- [Drizzle ORM](https://orm.drizzle.team/) - Database ORM
+- [Neon](https://neon.tech/) - Serverless PostgreSQL

@@ -13,7 +13,7 @@ This project uses Drizzle ORM with PostgreSQL 17 to persist file I/O operations.
 
 3. **Create a `.env` file** in the project root:
    ```env
-   DB_URL=postgresql://user:password@localhost:5432/battlecry_editor?sslmode=disable
+   DATABASE_URL=postgresql://user:password@localhost:5432/battlecry_editor?sslmode=disable
    PORT=5555
    ```
    Replace `user` and `password` with your PostgreSQL credentials.
