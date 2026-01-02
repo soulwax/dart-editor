@@ -4,12 +4,11 @@ const { drizzle } = require("drizzle-orm/postgres-js");
 const postgres = require("postgres");
 const { files } = require("./schema");
 
-// Create connection - support both DATABASE_URL (Neon/Vercel) and DB_URL
-const connectionString = process.env.DATABASE_URL || process.env.DB_URL;
+// Create connection
+const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  console.error("❌ DATABASE_URL or DB_URL not found in environment variables");
+  console.error("❌ DATABASE_URL not found in environment variables");
   console.error("   Please create a .env file with DATABASE_URL=postgresql://...");
-  console.error("   or DB_URL=postgresql://...");
   process.exit(1);
 }
 
