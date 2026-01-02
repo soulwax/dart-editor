@@ -1,5 +1,3 @@
-// Serverless-compatible version for Vercel deployment
-// Express must be imported at the top level for Vercel to detect this as a serverless function
 const express = require("express");
 require("dotenv").config();
 const { exec } = require("child_process");

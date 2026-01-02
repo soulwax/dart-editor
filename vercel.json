@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "buildCommand": "echo 'No build needed'",
   "rewrites": [
     {
       "source": "/compile",
@@ -17,6 +16,7 @@
   ],
   "functions": {
     "api/index.js": {
+      "runtime": "nodejs18.x",
       "maxDuration": 60,
       "includeFiles": "db/**"
     }
