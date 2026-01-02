@@ -3,19 +3,19 @@
   "rewrites": [
     {
       "source": "/compile",
-      "destination": "/api/server"
+      "destination": "/api"
     },
     {
       "source": "/health",
-      "destination": "/api/server"
+      "destination": "/api"
     },
     {
       "source": "/api/:path*",
-      "destination": "/api/server"
+      "destination": "/api"
     }
   ],
   "functions": {
-    "api/server.js": {
+    "api/index.js": {
       "maxDuration": 60,
       "includeFiles": "db/**"
     }
