@@ -153,3 +153,6 @@ temp/
 
 # Certificates (sensitive)
 certs/
+
+# Claude Code settings
+.claude/
