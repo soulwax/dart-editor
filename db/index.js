@@ -5,10 +5,10 @@ const postgres = require("postgres");
 const { files } = require("./schema");
 
 // Create connection
-const connectionString = process.env.DB_URL;
+const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  console.error("❌ DB_URL not found in environment variables");
-  console.error("   Please create a .env file with DB_URL=postgresql://...");
+  console.error("❌ DATABASE_URL not found in environment variables");
+  console.error("   Please create a .env file with DATABASE_URL=postgresql://...");
   process.exit(1);
 }
 

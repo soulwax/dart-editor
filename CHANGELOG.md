@@ -100,7 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drizzle configuration file (`drizzle.config.js`)
 - Database schema definition (`db/schema.js`)
 - Database connection module (`db/index.js`)
-- Environment variable support for `DB_URL`
+- Environment variable support for `DATABASE_URL`
 - Database setup documentation (`db/README.md`)
 
 #### New Database Scripts
