@@ -1,17 +1,23 @@
 {
   "version": 2,
-  "buildCommand": "npm install",
-  "framework": null,
-  "installCommand": "npm install",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/compile",
+      "destination": "/api/server"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/server"
+    },
+    {
+      "source": "/api/:path*",
       "destination": "/api/server"
     }
   ],
   "functions": {
     "api/server.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "db/**"
     }
   }
 }

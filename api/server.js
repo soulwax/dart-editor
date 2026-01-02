@@ -13,12 +13,8 @@ const app = express();
 // Middleware
 app.use(express.json({ limit: "1mb" }));
 
-// Serve static files - use absolute paths for Vercel
-const publicPath = path.join(__dirname, "..", "public");
-const monacoPath = path.join(__dirname, "..", "monaco");
-
-app.use(express.static(publicPath));
-app.use("/monaco", express.static(monacoPath));
+// Note: Static files are served by Vercel directly from public/ and monaco/
+// No need for express.static in serverless environment
 
 // Use /tmp for temporary files in serverless environment
 const TEMP_DIR = process.env.VERCEL ? "/tmp/dart-editor" : path.join(__dirname, "..", "temp");
@@ -420,11 +416,6 @@ app.get("/health", (req, res) => {
       message: available ? "Dart SDK available" : "Dart SDK not found in PATH",
     });
   });
-});
-
-// Root endpoint - serve index.html
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
 // Cleanup on startup for serverless (only clean files older than 1 hour)
