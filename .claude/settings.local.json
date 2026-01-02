@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git reset:*)",
       "Bash(cat:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(git add:*)"
     ]
   }
 }
