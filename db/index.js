@@ -5,17 +5,29 @@ const postgres = require("postgres");
 const { files } = require("./schema");
 
 // Create connection
-const connectionString = process.env.DATABASE_URL;
+const connectionString = process.env.DATABASE_URL || process.env.DB_URL;
 if (!connectionString) {
-  console.error("❌ DATABASE_URL not found in environment variables");
+  console.error("❌ DATABASE_URL or DB_URL not found in environment variables");
   console.error("   Please create a .env file with DATABASE_URL=postgresql://...");
-  process.exit(1);
+
+  // Don't exit in serverless environments - let it fail gracefully
+  if (!process.env.VERCEL && !process.env.NETLIFY) {
+    process.exit(1);
+  }
 }
 
-console.log("✅ Database connection string loaded:",
-  connectionString.replace(/:[^:@]+@/, ':****@')); // Hide password in logs
+if (connectionString) {
+  console.log("✅ Database connection string loaded:",
+    connectionString.replace(/:[^:@]+@/, ':****@')); // Hide password in logs
+}
 
-const client = postgres(connectionString);
+// Configure for serverless - max 1 connection, reuse connections
+const client = postgres(connectionString, {
+  max: 1, // Single connection for serverless
+  idle_timeout: 20,
+  connect_timeout: 10,
+});
+
 const db = drizzle(client, { schema: { files } });
 
 module.exports = {
