@@ -12,8 +12,13 @@ const app = express();
 
 // Middleware
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static("public"));
-app.use("/monaco", express.static("monaco"));
+
+// Serve static files - use absolute paths for Vercel
+const publicPath = path.join(__dirname, "..", "public");
+const monacoPath = path.join(__dirname, "..", "monaco");
+
+app.use(express.static(publicPath));
+app.use("/monaco", express.static(monacoPath));
 
 // Use /tmp for temporary files in serverless environment
 const TEMP_DIR = process.env.VERCEL ? "/tmp/dart-editor" : path.join(__dirname, "..", "temp");
