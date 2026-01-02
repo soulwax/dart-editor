@@ -1,22 +1,39 @@
 {
   "version": 2,
-  "rewrites": [
+  "builds": [
     {
-      "source": "/compile",
-      "destination": "/api"
+      "src": "api/index.js",
+      "use": "@vercel/node"
     },
     {
-      "source": "/health",
-      "destination": "/api"
+      "src": "public/**",
+      "use": "@vercel/static"
     },
     {
-      "source": "/api/:path*",
-      "destination": "/api"
+      "src": "monaco/**",
+      "use": "@vercel/static"
     }
   ],
-  "functions": {
-    "api/index.js": {
-      "maxDuration": 60
+  "routes": [
+    {
+      "src": "/monaco/(.*)",
+      "dest": "/monaco/$1"
+    },
+    {
+      "src": "/compile",
+      "dest": "/api/index.js"
+    },
+    {
+      "src": "/health",
+      "dest": "/api/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
     }
-  }
+  ]
 }
