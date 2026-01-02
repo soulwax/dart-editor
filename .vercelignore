@@ -15,3 +15,4 @@ certs/
 tree.txt
 ecosystem.config.js
 server.js
+monaco/
