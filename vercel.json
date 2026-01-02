@@ -16,8 +16,7 @@
   ],
   "functions": {
     "api/index.js": {
-      "maxDuration": 60,
-      "includeFiles": "db/**"
+      "maxDuration": 60
     }
   }
 }
